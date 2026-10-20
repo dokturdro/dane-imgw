@@ -1,0 +1,8 @@
+# No [theme] keys: any theme option pins Streamlit to a custom *light* theme,
+# and the dashboard should follow the system light/dark setting.
+
+[client]
+toolbarMode = "minimal"
+
+[browser]
+gatherUsageStats = false

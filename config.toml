@@ -1,0 +1,22 @@
+# Local IMGW mirror settings. Paths are relative to the project root.
+db_path = "data/imgw.duckdb"
+raw_dir = "data/raw"
+live_spool_dir = "data/live_spool"
+
+# Raw live rows are dropped once the archive covers their day, or after this many days
+# (telemetry-only stations never get archive rows).
+live_keep_days = 400
+
+# Daily archive (synop / klimat / opad) from this year on. 1951 = full depth.
+start_year = 1991
+networks = ["synop", "klimat", "opad"]
+
+# Hourly ("terminowe") archive. klimat hourly has only 06/12/18 UTC terms.
+hourly_start_year = 1991
+hourly_networks = ["synop"]
+
+keep_raw = true
+request_delay = 0.2
+
+normal_period = [1991, 2020]
+hot_period = [1981, 2020]
