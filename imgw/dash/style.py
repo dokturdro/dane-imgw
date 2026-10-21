@@ -31,6 +31,9 @@ _T2M = [
     (-38, "#bdbdbd", BLACK), (-40, "#969696", BLACK), (-42, "#737373", WHITE), (-44, "#525252", WHITE),
     (-46, "#252525", WHITE), (-100, "#000000", WHITE),
 ]
+# the same scale as a Vega-Lite threshold scale for charts: domain = lower bounds above the floor
+T2M_DOMAIN = [lo for lo, _, _ in reversed(_T2M[:-1])]
+T2M_RANGE = [bg for _, bg, _ in reversed(_T2M)]
 
 
 def _missing(v) -> bool:

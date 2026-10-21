@@ -7,6 +7,8 @@ from __future__ import annotations
 import altair as alt
 import pandas as pd
 
+from imgw.dash import style
+
 MONTH_ABBR = ["sty", "lut", "mar", "kwi", "maj", "cze", "lip", "sie", "wrz", "paź", "lis", "gru"]
 
 THEMES = {
@@ -87,14 +89,22 @@ def hourly_temperature(df: pd.DataFrame, theme: str) -> alt.Chart:
     t = THEMES[theme]
     d = df[["date", "tm", "td"]].melt("date", var_name="series", value_name="value")
     d["series"] = d["series"].map({"tm": "temperatura", "td": "punkt rosy"})
-    c = alt.Chart(d).mark_line(strokeWidth=2, point=alt.OverlayMarkDef(size=30)).encode(
-        x=alt.X("date:T", title=None, axis=alt.Axis(format="%d.%m %H:%M")),
-        y=alt.Y("value:Q", title="°C", scale=alt.Scale(zero=False)),
-        color=alt.Color("series:N", title=None,
-                        scale=alt.Scale(domain=["temperatura", "punkt rosy"], range=[t["s1"], t["s2"]])),
+    d = d.dropna(subset=["value"])
+    series = alt.Scale(domain=["temperatura", "punkt rosy"], range=[t["s1"], t["s2"]])
+    base = alt.Chart(d).encode(x=alt.X("date:T", title=None, axis=alt.Axis(format="%d.%m %H:%M")),
+                               y=alt.Y("value:Q", title="°C", scale=alt.Scale(zero=False)))
+    line = base.mark_line(strokeWidth=2).encode(color=alt.Color("series:N", title=None, scale=series))
+    # dots filled with the table's temperature colours, ringed in the series colour
+    dots = base.mark_point(size=55, filled=True, strokeWidth=1.5, opacity=1).encode(
+        fill=alt.Fill("value:Q", legend=None,
+                      scale=alt.Scale(type="threshold", domain=style.T2M_DOMAIN, range=style.T2M_RANGE)),
+        stroke=alt.Stroke("series:N", title=None, scale=series),
         tooltip=[alt.Tooltip("date:T", title="czas UTC", format="%Y-%m-%d %H:%M"),
                  alt.Tooltip("series:N", title="seria"), alt.Tooltip("value:Q", format=".1f", title="°C")])
-    return _cfg(c, t, 220)
+    # temperature labels above its dots, dew point below, so the two series don't collide
+    text = [base.mark_text(dy=dy, fontSize=9, color=t["ink2"]).encode(text=alt.Text("value:Q", format=".1f"))
+            .transform_filter(alt.datum.series == s) for s, dy in (("temperatura", -10), ("punkt rosy", 11))]
+    return _cfg(alt.layer(line, dots, *text), t, 260)
 
 
 def climograph(year_vals: pd.DataFrame, normals: pd.DataFrame, theme: str, unit: str,
