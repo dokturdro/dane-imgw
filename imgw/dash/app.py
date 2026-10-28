@@ -155,9 +155,35 @@ SHORT = {"tm": "Tśr", "tx": "Tmax", "tn": "Tmin", "tng": "Tmin grunt", "tm2": "
          "glaze_time": "gołoledź h", "rime_time": "sadź h", "ww": "ww", "w1": "W1"}
 
 
-def column_config(cols, names):
+# additive daily values: the month summary also shows their sum
+SUMMABLE = {"prcp", "fresh_snow", "sunshine", *[c for g in DAILY_GROUPS.values() for c in g if c.endswith("_time")]}
+
+
+def month_summary(d: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    """Min / max / mean (and sum for additive columns), laid out with the daily table's columns.
+
+    The row label goes in ``date``; columns that have no such statistic stay blank.
+    """
+    data = [c for c in columns if c not in ("date", "◦")]
+    num = [c for c in data if c in d and pd.api.types.is_numeric_dtype(d[c])]
+    rows = {"min": d[num].min(), "max": d[num].max(), "średnia": d[num].mean(),
+            "suma": d[[c for c in num if c in SUMMABLE]].sum(min_count=1)}
+    out = pd.DataFrame(rows).T.reindex(columns=data).astype("float64")
+    if out.loc["suma"].isna().all():
+        out = out.drop(index="suma")
+    out = out.rename_axis("date").reset_index()
+    if "◦" in columns:
+        out["◦"] = ""
+    return out[columns]
+
+
+def column_config(cols, names, width=None):
     """Short headers; the full Polish name and the code go in the header tooltip."""
-    return {c: st.column_config.Column(SHORT.get(c, c), help=f"{names.get(c, c)} ({c})") for c in cols}
+    return {c: st.column_config.Column(SHORT.get(c, c), help=f"{names.get(c, c)} ({c})", width=width) for c in cols}
+
+
+# fixed pixel widths so the month summary lines up with the daily table below it
+DATE_W, PROV_W, VALUE_W = 100, 70, 84
 
 
 COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
@@ -265,11 +291,18 @@ with tab_now:
             if d["provisional"].any():
                 view.insert(1, "◦", d["provisional"].map({True: "wstępne", False: ""}))
             view = view.sort_values("date", ascending=False)
+            cc = {"◦": st.column_config.Column(" ", width=PROV_W), **column_config(cols, labels.DAILY_VARS, VALUE_W)}
+            m = load("daily", sid, TODAY.replace(day=1), TODAY)
+            if not m.empty:
+                st.caption(f"{charts.MONTH_ABBR[TODAY.month - 1]} {TODAY.year} do dziś · {len(m)} dni")
+                summ = month_summary(m, list(view.columns))
+                st.dataframe(style.style_frame(summ, style.DAILY_SCALES), hide_index=True, width="stretch",
+                             placeholder="", height=36 * (len(summ) + 1) + 3,
+                             column_config={"date": st.column_config.Column(" ", width=DATE_W), **cc})
             st.dataframe(style.style_frame(view, style.DAILY_SCALES), hide_index=True, width="stretch", placeholder="",
                          height=min(36 * (len(view) + 1) + 3, 520),
-                         column_config={"date": st.column_config.DateColumn("data", format="YYYY-MM-DD"),
-                                        "◦": st.column_config.Column(" ", width="small"),
-                                        **column_config(cols, labels.DAILY_VARS)})
+                         column_config={"date": st.column_config.DateColumn("data", format="YYYY-MM-DD", width=DATE_W),
+                                        **cc})
 
             norm = load("monthly_normals", sid, "tm")
             nd = None
