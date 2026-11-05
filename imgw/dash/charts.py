@@ -10,14 +10,17 @@ import pandas as pd
 from imgw.dash import style
 
 MONTH_ABBR = ["sty", "lut", "mar", "kwi", "maj", "cze", "lip", "sie", "wrz", "paź", "lis", "gru"]
+RAIN_STOPS_MM = [0, 2.5, 10, 22.5, 40]  # daily totals pinned to each THEMES "rain" colour
 
 THEMES = {
     "light": dict(s1="#2a78d6", s2="#eb6834", ink="#0b0b0b", ink2="#52514e", muted="#898781",
                   grid="#e1e0d9", axis="#c3c2b7", band="#e1e0d9", context="#c3c2b7",
-                  div=["#184f95", "#f0efec", "#e34948"]),
+                  div=["#184f95", "#f0efec", "#e34948"],
+                  rain=["#9ec5f4", "#5598e7", "#2a78d6", "#1c5cab", "#0d366b"]),
     "dark": dict(s1="#3987e5", s2="#d95926", ink="#f0efec", ink2="#c3c2b7", muted="#898781",
                  grid="#2c2c2a", axis="#383835", band="#383835", context="#52514e",
-                 div=["#3987e5", "#383835", "#e66767"]),
+                 div=["#3987e5", "#383835", "#e66767"],
+                 rain=["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf"]),
 }
 
 
@@ -66,9 +69,15 @@ def daily_precip(df: pd.DataFrame, theme: str) -> alt.Chart:
     d = df[["date", "prcp"]].copy()
     d["date"] = pd.to_datetime(d["date"])
     d["cum"] = d["prcp"].fillna(0).cumsum()
-    bars = alt.Chart(d).mark_bar(color=t["s1"], cornerRadiusTopLeft=2, cornerRadiusTopRight=2).encode(
-        x=alt.X("date:T", title=None, axis=alt.Axis(format="%d.%m")),
-        y=alt.Y("prcp:Q", title="opad [mm]"),
+    # each bar spans its whole day, centred on the date, less a 1px gap between neighbours
+    half_day = pd.Timedelta(hours=12)
+    d["start"], d["end"] = d["date"] - half_day, d["date"] + half_day
+    bars = alt.Chart(d).mark_bar(xOffset=0.5, x2Offset=-0.5, cornerRadiusTopLeft=2, cornerRadiusTopRight=2).encode(
+        x=alt.X("start:T", title=None, axis=alt.Axis(format="%d.%m")), x2="end:T",
+        y=alt.Y("prcp:Q", title="opad [mm]"), y2=alt.datum(0),
+        # fixed mm stops, so a shade means the same rainfall whatever the date range
+        color=alt.Color("prcp:Q", legend=None, scale=alt.Scale(
+            domain=RAIN_STOPS_MM, range=t["rain"], clamp=True)),
         tooltip=[alt.Tooltip("date:T", title="data", format="%Y-%m-%d"),
                  alt.Tooltip("prcp:Q", title="opad", format=".1f")])
     cum = alt.Chart(d).mark_line(strokeWidth=2, color=t["s1"]).encode(
@@ -79,6 +88,7 @@ def daily_precip(df: pd.DataFrame, theme: str) -> alt.Chart:
     # two charts, two axes — never a dual axis
     return (alt.vconcat(bars.properties(height=130, width="container"),
                         cum.properties(height=100, width="container"))
+            .resolve_scale(x="shared")
             .configure_view(stroke=None)
             .configure_axis(gridColor=t["grid"], domainColor=t["axis"], tickColor=t["axis"],
                             labelColor=t["ink2"], titleColor=t["ink2"], titleFontWeight="normal")
