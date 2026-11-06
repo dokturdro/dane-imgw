@@ -16,10 +16,12 @@ THEMES = {
     "light": dict(s1="#2a78d6", s2="#eb6834", ink="#0b0b0b", ink2="#52514e", muted="#898781",
                   grid="#e1e0d9", axis="#c3c2b7", band="#e1e0d9", context="#c3c2b7",
                   div=["#184f95", "#f0efec", "#e34948"],
+                  frost="rgba(158, 197, 244, 0.35)",
                   rain=["#9ec5f4", "#5598e7", "#2a78d6", "#1c5cab", "#0d366b"]),
     "dark": dict(s1="#3987e5", s2="#d95926", ink="#f0efec", ink2="#c3c2b7", muted="#898781",
                  grid="#2c2c2a", axis="#383835", band="#383835", context="#52514e",
                  div=["#3987e5", "#383835", "#e66767"],
+                 frost="rgba(57, 135, 229, 0.18)",
                  rain=["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf"]),
 }
 
@@ -114,7 +116,12 @@ def hourly_temperature(df: pd.DataFrame, theme: str) -> alt.Chart:
     # temperature labels above its dots, dew point below, so the two series don't collide
     text = [base.mark_text(dy=dy, fontSize=9, color=t["ink2"]).encode(text=alt.Text("value:Q", format=".1f"))
             .transform_filter(alt.datum.series == s) for s, dy in (("temperatura", -10), ("punkt rosy", 11))]
-    return _cfg(alt.layer(line, dots, *text), t, 260)
+    # sub-zero shading, positioned from the y scale so it can't stretch the axis to reach 0:
+    # clamped to the plot, it collapses to nothing when 0 lies below the visible range
+    frost = alt.Chart(alt.Data(values=[{}])).mark_rect(
+        color=t["frost"], x=0, x2=alt.expr("width"),
+        y=alt.expr("clamp(scale('y', 0), 0, height)"), y2=alt.expr("height"))
+    return _cfg(alt.layer(frost, line, dots, *text), t, 260)
 
 
 def climograph(year_vals: pd.DataFrame, normals: pd.DataFrame, theme: str, unit: str,
