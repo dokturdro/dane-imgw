@@ -97,7 +97,7 @@ def synced_fingerprints(con: duckdb.DuckDBPyConnection) -> dict[str, str]:
     ).fetchall())
 
 
-def log_sync(con, url: str, fingerprint: str, sha: str, rows: int, status: str) -> None:
+def log_sync(con: duckdb.DuckDBPyConnection, url: str, fingerprint: str, sha: str, rows: int, status: str) -> None:
     con.execute(
         "INSERT OR REPLACE INTO sync_log VALUES (?, ?, ?, ?, ?, ?)",
         [url, fingerprint, sha, rows, datetime.now(), status],

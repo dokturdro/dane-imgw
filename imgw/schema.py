@@ -69,11 +69,6 @@ class FileSpec:
     def status_columns(self) -> set[str]:
         return {s for c in self.columns if (s := self.status_of(c))}
 
-    @property
-    def value_columns(self) -> list[str]:
-        st = self.status_columns
-        return [c for c in self.columns if c not in st]
-
 
 SPECS: dict[str, FileSpec] = {
     k: FileSpec(k, tuple(v.split())) for k, v in _SPECS.items()

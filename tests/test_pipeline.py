@@ -123,3 +123,12 @@ def test_seasonal_djf_belongs_to_next_year(con):
     row = con.execute("""SELECT days_present, days_missing FROM period_summary
                          WHERE period = 'DJF' AND year = 2026 AND variable = 'tm'""").fetchone()
     assert row == (90, 0)
+
+
+def test_period_anomaly_uses_configured_normal_period(con):
+    for y in (2001, 2002, 2003):
+        db.replace_rows(con, "daily_obs", _daily_frame(date(y, 1, 1), 365, [float(y - 2000)] * 365))
+    climate.rebuild_all(con, Config(normal_period=(2001, 2002)))
+    got = con.execute("""SELECT anomaly FROM v_period
+                         WHERE period = 'year' AND year = 2003 AND variable = 'tm'""").fetchone()[0]
+    assert got == pytest.approx(1.5)      # 3 - mean(1, 2)

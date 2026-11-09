@@ -7,6 +7,7 @@ read-only one, so the dashboard never holds the file between queries and
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date, timedelta
 from pathlib import Path
@@ -22,7 +23,7 @@ REFERENCE_PERIODS = [(1961, 1990), (1971, 2000), (1981, 2010), (1991, 2020)]
 
 
 @contextmanager
-def open_ro(path: Path, wait: float = 3.0):
+def open_ro(path: Path, wait: float = 3.0) -> Iterator[duckdb.DuckDBPyConnection]:
     con = db.connect(path, read_only=True, wait=wait)
     try:
         yield con
@@ -42,7 +43,7 @@ def stations(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     return df
 
 
-def freshness(con, sid: str) -> dict:
+def freshness(con: duckdb.DuckDBPyConnection, sid: str) -> dict:
     a = con.execute("SELECT max(date) FROM daily_obs WHERE imgw_id = ?", [sid]).fetchone()[0]
     h = con.execute("SELECT max(ts) FROM hourly_obs WHERE imgw_id = ?", [sid]).fetchone()[0]
     l = con.execute("SELECT max(ts) FROM live_obs WHERE imgw_id = ?", [sid]).fetchone()[0]
@@ -50,7 +51,7 @@ def freshness(con, sid: str) -> dict:
     return {"archive": a, "hourly": h, "live": l, "synop": s}
 
 
-def daily(con, sid: str, start: date, end: date) -> pd.DataFrame:
+def daily(con: duckdb.DuckDBPyConnection, sid: str, start: date, end: date) -> pd.DataFrame:
     """Archive days plus provisional days after the archive ends (column ``provisional``)."""
     arch = con.execute("""
         SELECT *, FALSE AS provisional FROM v_daily
@@ -67,7 +68,7 @@ def daily(con, sid: str, start: date, end: date) -> pd.DataFrame:
     return pd.concat(parts, ignore_index=True).sort_values("date").reset_index(drop=True)
 
 
-def latest_synop(con, sid: str) -> dict | None:
+def latest_synop(con: duckdb.DuckDBPyConnection, sid: str) -> dict | None:
     """Most recent SYNOP-message observation for the station (provisional)."""
     df = con.execute("""
         SELECT * FROM v_hourly WHERE imgw_id = ? AND provisional ORDER BY date DESC LIMIT 1
@@ -75,21 +76,21 @@ def latest_synop(con, sid: str) -> dict | None:
     return None if df.empty else df.iloc[0].to_dict()
 
 
-def live_days(con, sid: str, days: int = 3) -> pd.DataFrame:
+def live_days(con: duckdb.DuckDBPyConnection, sid: str, days: int = 3) -> pd.DataFrame:
     return con.execute("""
         SELECT * FROM v_live_daily WHERE imgw_id = ? AND date >= current_date - ?::INTEGER
         ORDER BY date DESC
     """, [sid, days]).df()
 
 
-def monthly_normals(con, sid: str, variable: str) -> pd.DataFrame:
+def monthly_normals(con: duckdb.DuckDBPyConnection, sid: str, variable: str) -> pd.DataFrame:
     return con.execute("""
         SELECT month, mean, sd, p10, p90, n_years FROM normals
         WHERE imgw_id = ? AND variable = ? ORDER BY month
     """, [sid, variable]).df()
 
 
-def month_to_date(con, sid: str, today: date) -> dict:
+def month_to_date(con: duckdb.DuckDBPyConnection, sid: str, today: date) -> dict:
     """This month's provisional+archive tm mean and prcp sum vs the normal."""
     first = today.replace(day=1)
     d = daily(con, sid, first, today)
@@ -116,13 +117,13 @@ def month_to_date(con, sid: str, today: date) -> dict:
     return out
 
 
-def hourly(con, sid: str, start: date, end: date) -> pd.DataFrame:
+def hourly(con: duckdb.DuckDBPyConnection, sid: str, start: date, end: date) -> pd.DataFrame:
     return con.execute("""
         SELECT * FROM v_hourly WHERE imgw_id = ? AND date >= ? AND date < ? ORDER BY date
     """, [sid, start, end + timedelta(days=1)]).df()
 
 
-def monthly_grid(con, sid: str, variable: str, max_missing: int = 3) -> dict[str, pd.DataFrame]:
+def monthly_grid(con: duckdb.DuckDBPyConnection, sid: str, variable: str, max_missing: int = 3) -> dict[str, pd.DataFrame]:
     """Year × (12 months + DJF/MAM/JJA/SON/year) frames: value, class, flags, tooltip data."""
     m = con.execute("""
         SELECT year, CAST(month AS VARCHAR) AS col, value, class, days_present, days_missing,
@@ -161,14 +162,15 @@ def reference_means(long: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows).T.reindex(columns=MONTH_COLS + PERIOD_COLS)
 
 
-def monthly_year(con, sid: str, year: int, variables=("tm", "prcp")) -> pd.DataFrame:
+def monthly_year(con: duckdb.DuckDBPyConnection, sid: str, year: int,
+                 variables: tuple[str, ...] = ("tm", "prcp")) -> pd.DataFrame:
     return con.execute(f"""
         SELECT month, variable, value, is_partial, class FROM v_monthly
         WHERE imgw_id = ? AND year = ? AND variable IN ({', '.join('?' * len(variables))})
     """, [sid, year, *variables]).df()
 
 
-def annual_anomalies(con, sid: str, variable: str = "tm") -> pd.DataFrame:
+def annual_anomalies(con: duckdb.DuckDBPyConnection, sid: str, variable: str = "tm") -> pd.DataFrame:
     return con.execute("""
         SELECT year, value, anomaly, class FROM v_period
         WHERE imgw_id = ? AND variable = ? AND period = 'year' AND NOT is_partial
@@ -176,7 +178,7 @@ def annual_anomalies(con, sid: str, variable: str = "tm") -> pd.DataFrame:
     """, [sid, variable]).df()
 
 
-def cumulative_prcp(con, sid: str) -> pd.DataFrame:
+def cumulative_prcp(con: duckdb.DuckDBPyConnection, sid: str) -> pd.DataFrame:
     """Day-of-year cumulative precipitation for every year with near-complete data."""
     return con.execute("""
         WITH d AS (

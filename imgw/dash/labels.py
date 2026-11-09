@@ -1,6 +1,8 @@
 """Polish labels ported from dane.meteomodel.pl (descriptions.js, utils-*.js,
 monthly selector). Generated once from the site's JS; edit freely."""
 
+MONTH_ABBR = ["sty", "lut", "mar", "kwi", "maj", "cze", "lip", "sie", "wrz", "paź", "lis", "gru"]
+
 MONTHLY_VARS = {'tm': 'Średnia temperatura',
  'tm2': 'Średnia temperatura (tx+tn)/2',
  'tx': 'Średnia temperatura maksymalna',
@@ -214,53 +216,6 @@ WW_NAMES = {10: 'Zamglenie',
     'ciągu ostatniej godziny, nie wichura pyłowa lub piaskowa',
  9: 'Wichura pyłowa lub piaskowa w zasięgu widzenia w czasie obserwacji lub na stacji w ciągu '
     'ostatniej godziny'}
-
-CLOUD_NAMES = {'cl': {'0': 'Brak',
-        '1': 'Cumulus humilis lub Cumulus fractus (ale nie złej pogody) lub obie chmury razem',
-        '2': 'Cumulus mediocris lub congestus występujący sam lub z Cu hum lub Cu fra bądź też ze '
-             'Stratocumulus; wszystkie chmury na tym samym poziomie',
-        '3': 'Cumulonimbus calvus (sam lub z Cu, Sc lub St)',
-        '4': 'Stratocumulus cumulogenitus',
-        '5': 'Stratocumulus (lecz nie cumulogenitus)',
-        '6': 'Stratus nebulosus lub Stratus fractus (lecz nie złej pogody) lub obie chmury razem',
-        '7': 'Stratus fractus lub Cumulus fractus (złej pogody) lub obie chmury razem (pannus), '
-             'zwykle pod Altostratus lub Nimbostratus',
-        '8': 'Cumulus i Stratocumulus (lecz nie Stratocumulus cumulogenitus) o podstawach na '
-             'różnych poziomach',
-        '9': 'Cumulonimbus capillatus (często z kowadłem) występujący sam lub z Cumulonimbus '
-             'calvus, Cumulus, Stratocumulus, Stratus lub pannus',
-        '/': 'chmury nie były widoczne (ciemność, mgła)'},
- 'cm': {'0': 'Brak',
-        '1': 'Altostratus translucidus',
-        '2': 'Altostratus opacus lub Nimbostratus',
-        '3': 'Altocumulus translucidus na jednym poziomie',
-        '4': 'ławice Altocumulus translucidus, często soczewkowate, ciągle zmieniające się i '
-             'występujące na jednym lub kilku poziomach',
-        '5': 'Altocumulus translucidus w pasmach, albo jedna lub więcej warstw Altocumulus '
-             'translucidus lub opacus, stopniowo zaciągająca niebo; te chmury Ac na ogół w całości '
-             'grubieją',
-        '6': 'Altocumulus cumulogenitus (lub cumulonimbogenitus)',
-        '7': 'Altocumulus translucidus lub opacus w dwóch lub więcej warstwach, lub Altocumulus '
-             'opacus w pojedynczej warstwie, nie zaciągający nieba lub Altocumulus z Altostratus '
-             'lub Nimbostratus',
-        '8': 'Altocumulus castellanus lub floccus',
-        '9': 'Altocumulus na niebie o wyglądzie chaotycznym, na ogół na kilku poziomach',
-        '/': 'chmury nie były widoczne (ciemność, mgła, ciągła warstwa chmur niskich)'},
- 'ch': {'0': 'Brak',
-        '1': 'Cirrus fibratus lub Cirrus uncinus (nie zaciągający nieba)',
-        '2': 'Cirrus spissatus w ławicach lub w postaci poplątanych wiązek, albo Cirrus '
-             'castellanus lub floccus',
-        '3': 'Cirrus spissatus cumulonimbogenitus',
-        '4': 'Cirrus uncinus lub Cirrus fibratus lub obie te chmury razem (stopniowo zaciągający '
-             'niebo)',
-        '5': 'Cirrus (w pasmach) i Cirrostratus lub sam Cirrostratus stopniowo zaciągający niebo, '
-             'ale nie wyżej niż 45° nad horyzontem',
-        '6': 'Cirrus (w pasmach) i Cirrostratus lub sam Cirrostratus stopniowo zaciągający niebo, '
-             'powyżej niż 45° nad horyzontem, lecz nie pokrywa całkowicie nieba',
-        '7': 'Cirrostratus pokrywający całkowicie niebo',
-        '8': 'Cirrostratus nie zaciągający i nie pokrywający nieba',
-        '9': 'Cirrocumulus sam lub przeważający wśród chmur wysokich',
-        '/': 'Chmury nie były widoczne (ciemność, mgła, ciągła warstwa chmur niższych)'}}
 
 DESCRIPTIONS = {'tm': 'Średnia temperatura dobowa. Od 1966 r. na stacjach synoptycznych (id = 3xxxxxxxx) '
        'wyliczana z 8 terminów na dobę w czasie UTC (wcześniej wg wzoru [T06 + T12 + 2*T20]/4 w '

@@ -9,7 +9,7 @@ import httpx
 import pandas as pd
 import pytest
 
-from imgw import crawl, db, download, live
+from imgw import crawl, db, download, live, spool
 
 
 @pytest.fixture
@@ -31,23 +31,24 @@ def _snap(fetched_at: datetime, temp: float) -> dict:
 
 
 def test_spooled_polls_are_ingested_once(con, tmp_path):
-    spool = tmp_path / "spool"
+    spool_dir = tmp_path / "spool"
     t0 = datetime(2026, 10, 17, 12, 0, 5)
     for i in range(3):
-        live.spool(_snap(t0 + timedelta(minutes=10 * i), 10.0 + i), spool)
-    live.spool(_snap(t0, 10.0), spool)          # same readings again, later file name
-    assert live.drain_spool(con, spool) == 4    # 3 telemetry + 1 synop hour
-    assert list(spool.iterdir()) == []
+        t = t0 + timedelta(minutes=10 * i)
+        spool.save(_snap(t, 10.0 + i), spool_dir, t)
+    spool.save(_snap(t0, 10.0), spool_dir, t0 + timedelta(hours=1))   # same readings again, later file name
+    assert live.drain_spool(con, spool_dir) == 4    # 3 telemetry + 1 synop hour
+    assert list(spool_dir.iterdir()) == []
     assert live.ingest(con, _snap(t0, 10.0))["new_rows"] == 0
     assert con.execute("SELECT name FROM stations WHERE imgw_id = '999000001'").fetchone() == ("X",)
 
 
 def test_bad_spool_file_is_set_aside(con, tmp_path):
-    spool = tmp_path / "spool"
-    spool.mkdir()
-    (spool / "20261017T000000000000.json").write_text("{trunc", encoding="utf-8")
-    assert live.drain_spool(con, spool) == 0
-    assert [p.suffix for p in spool.iterdir()] == [".bad"]
+    spool_dir = tmp_path / "spool"
+    spool_dir.mkdir()
+    (spool_dir / "20261017T000000000000.json").write_text("{trunc", encoding="utf-8")
+    assert live.drain_spool(con, spool_dir) == 0
+    assert [p.suffix for p in spool_dir.iterdir()] == [".bad"]
 
 
 def test_prune_drops_old_unarchived_rows_and_resolves_synop_ids(con):

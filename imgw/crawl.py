@@ -38,10 +38,6 @@ class RemoteFile:
     last_year: int
     fingerprint: str     # "<mtime>|<size>" from the listing
 
-    @property
-    def name(self) -> str:
-        return self.url.rsplit("/", 1)[-1]
-
 
 def list_dir(client: httpx.Client, url: str) -> list[tuple[str, str, str]]:
     """Return [(href, mtime, size)] for one listing page."""

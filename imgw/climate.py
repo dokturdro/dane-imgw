@@ -47,8 +47,15 @@ for _t in (10, 15, 20):
 for _t, _n in ((10, "10"), (0, "0"), (-10, "m10"), (-20, "m20"), (-30, "m30")):
     VARIABLES[f"tnlt{_n}"] = (f"count(*) FILTER (WHERE tn <= {_t})", "tn")
 
-SEASONS = "CASE WHEN month(d.date) IN (12,1,2) THEN 'DJF' WHEN month(d.date) IN (3,4,5) THEN 'MAM' " \
-          "WHEN month(d.date) IN (6,7,8) THEN 'JJA' ELSE 'SON' END"
+
+def _season(day: str) -> str:
+    return (f"CASE WHEN month({day}) IN (12,1,2) THEN 'DJF' WHEN month({day}) IN (3,4,5) THEN 'MAM' "
+            f"WHEN month({day}) IN (6,7,8) THEN 'JJA' ELSE 'SON' END")
+
+
+def _season_year(day: str) -> str:
+    """DJF is dated to the year of its Jan/Feb."""
+    return f"CASE WHEN month({day}) = 12 THEN year({day}) + 1 ELSE year({day}) END"
 
 
 def rebuild_thresholds(con: duckdb.DuckDBPyConnection, cfg: Config) -> None:
@@ -105,10 +112,9 @@ def rebuild_monthly(con: duckdb.DuckDBPyConnection) -> int:
 
 
 def rebuild_periods(con: duckdb.DuckDBPyConnection) -> int:
-    """Seasonal (DJF dated to the year of its Jan/Feb) and annual summaries."""
-    season_year = "CASE WHEN month(d.date) = 12 THEN year(d.date) + 1 ELSE year(d.date) END"
+    """Seasonal and annual summaries."""
     con.execute(f"""CREATE OR REPLACE TEMP TABLE _wide AS
-        {_summary_select(f"{season_year} AS year, {SEASONS} AS period")}
+        {_summary_select(f"{_season_year('d.date')} AS year, {_season('d.date')} AS period")}
         UNION ALL BY NAME
         {_summary_select("year(d.date) AS year, 'year' AS period")}
     """)
@@ -116,10 +122,7 @@ def rebuild_periods(con: duckdb.DuckDBPyConnection) -> int:
     con.execute("DELETE FROM period_summary")
     con.execute(f"""
         WITH cal AS (
-            SELECT CASE WHEN month(d) = 12 THEN year(d) + 1 ELSE year(d) END AS year,
-                   CASE WHEN month(d) IN (12,1,2) THEN 'DJF' WHEN month(d) IN (3,4,5) THEN 'MAM'
-                        WHEN month(d) IN (6,7,8) THEN 'JJA' ELSE 'SON' END AS period,
-                   count(*) AS n
+            SELECT {_season_year('d')} AS year, {_season('d')} AS period, count(*) AS n
             FROM range(DATE '1900-12-01', DATE '2101-01-01', INTERVAL 1 DAY) t(d) GROUP BY ALL
             UNION ALL
             SELECT year(d), 'year', count(*)
@@ -156,8 +159,26 @@ def rebuild_normals(con: duckdb.DuckDBPyConnection, cfg: Config, max_missing: in
     return con.execute("SELECT count(*) FROM normals").fetchone()[0]
 
 
+def rebuild_period_normals(con: duckdb.DuckDBPyConnection, cfg: Config) -> int:
+    """Mean of complete seasons / years over the normal period (v_period anomalies).
+
+    Complete = at most 5 (season) or 10 (year) days missing, as in v_period.
+    """
+    y0, y1 = cfg.normal_period
+    con.execute(f"""
+        CREATE OR REPLACE TABLE period_normals AS
+        SELECT imgw_id, period, variable, avg(value) AS mean
+        FROM period_summary
+        WHERE year BETWEEN {y0} AND {y1} AND value IS NOT NULL
+          AND days_missing <= CASE period WHEN 'year' THEN 10 ELSE 5 END
+        GROUP BY imgw_id, period, variable
+    """)
+    return con.execute("SELECT count(*) FROM period_normals").fetchone()[0]
+
+
 def rebuild_all(con: duckdb.DuckDBPyConnection, cfg: Config) -> dict[str, int]:
     rebuild_thresholds(con, cfg)
     out = {"monthly": rebuild_monthly(con), "periods": rebuild_periods(con)}
     out["normals"] = rebuild_normals(con, cfg)
+    out["period_normals"] = rebuild_period_normals(con, cfg)
     return out

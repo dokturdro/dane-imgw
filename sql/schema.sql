@@ -106,6 +106,10 @@ CREATE TABLE IF NOT EXISTS normals (            -- rebuilt by imgw.climate.rebui
     n_years BIGINT, mean DOUBLE, sd DOUBLE, p10 DOUBLE, p90 DOUBLE, min DOUBLE, max DOUBLE
 );
 
+CREATE TABLE IF NOT EXISTS period_normals (     -- rebuilt by imgw.climate.rebuild_period_normals
+    imgw_id VARCHAR, period VARCHAR, variable VARCHAR, mean DOUBLE
+);
+
 CREATE TABLE IF NOT EXISTS station_thresholds (
     imgw_id VARCHAR PRIMARY KEY, hot_p95 DOUBLE
 );
@@ -333,15 +337,15 @@ WITH m AS (
         quantile_cont(value, [0.05, 0.1, 0.2, 0.3, 0.4, 0.6, 0.7, 0.8, 0.9, 0.95])
             FILTER (WHERE complete) OVER p AS th,
         max(value) FILTER (WHERE complete) OVER p AS rec_hi,
-        min(value) FILTER (WHERE complete) OVER p AS rec_lo,
-        avg(value) FILTER (WHERE complete AND year BETWEEN 1991 AND 2020) OVER p AS normal
+        min(value) FILTER (WHERE complete) OVER p AS rec_lo
     FROM m WINDOW p AS (PARTITION BY imgw_id, period, variable)
 )
-SELECT imgw_id, year, period, variable, value, days_present, days_missing,
-       NOT complete AS is_partial,
-       CASE WHEN complete AND value IS NOT NULL
-            THEN 11 - len(list_filter(th, x -> x < value)) END AS class,
-       complete AND value = rec_hi AS is_record_high,
-       complete AND value = rec_lo AS is_record_low,
-       value - normal AS anomaly
-FROM w;
+SELECT w.imgw_id, w.year, w.period, w.variable, w.value, w.days_present, w.days_missing,
+       NOT w.complete AS is_partial,
+       CASE WHEN w.complete AND w.value IS NOT NULL
+            THEN 11 - len(list_filter(w.th, x -> x < w.value)) END AS class,
+       w.complete AND w.value = w.rec_hi AS is_record_high,
+       w.complete AND w.value = w.rec_lo AS is_record_low,
+       w.value - n.mean AS anomaly
+FROM w LEFT JOIN period_normals n
+       ON n.imgw_id = w.imgw_id AND n.period = w.period AND n.variable = w.variable;

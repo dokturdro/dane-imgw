@@ -9,9 +9,12 @@ The monthly class scale is a diverging red-grey-blue ramp (dataviz rules).
 
 from __future__ import annotations
 
+import html
 import math
 
 import pandas as pd
+
+from imgw.dash import labels
 
 WHITE, BLACK = "#ffffff", "#000000"
 
@@ -36,7 +39,7 @@ T2M_DOMAIN = [lo for lo, _, _ in reversed(_T2M[:-1])]
 T2M_RANGE = [bg for _, bg, _ in reversed(_T2M)]
 
 
-def _missing(v) -> bool:
+def _missing(v: object) -> bool:
     return v is None or (isinstance(v, float) and math.isnan(v)) or v is pd.NA
 
 
@@ -44,7 +47,7 @@ def _css(bg: str, fg: str) -> str:
     return f"background-color: {bg}; color: {fg}"
 
 
-def temperature(v) -> str:
+def temperature(v: float | None) -> str:
     if _missing(v):
         return ""
     for lo, bg, fg in _T2M:
@@ -53,7 +56,7 @@ def temperature(v) -> str:
     return ""
 
 
-def precipitation(v) -> str:
+def precipitation(v: float | None) -> str:
     if _missing(v):
         return ""
     if v < 0:
@@ -69,7 +72,7 @@ def precipitation(v) -> str:
     return _css("#000000", WHITE)
 
 
-def sunshine_daily(v) -> str:
+def sunshine_daily(v: float | None) -> str:
     if _missing(v) or v < 0:
         return ""
     steps = [("#ffffcc", BLACK), ("#ffeda0", BLACK), ("#fed976", BLACK), ("#feb24c", BLACK),
@@ -78,7 +81,7 @@ def sunshine_daily(v) -> str:
     return _css(*steps[min(int(v // 2), 8)])
 
 
-def sunshine_hourly(v) -> str:
+def sunshine_hourly(v: float | None) -> str:
     if _missing(v) or v < 0:
         return ""
     # meteomodel's hourly scale in 0.1 h steps (its 0.7-0.8 gap renders white; kept as-is)
@@ -92,7 +95,7 @@ def sunshine_hourly(v) -> str:
     return _css(*steps[i]) if i < len(steps) else _css(WHITE, BLACK)
 
 
-def cloud_cover(v) -> str:
+def cloud_cover(v: float | None) -> str:
     """Oktas."""
     if _missing(v):
         return ""
@@ -103,7 +106,7 @@ def cloud_cover(v) -> str:
     return _css("#333333", WHITE) if v < 8 else _css("#000000", WHITE)
 
 
-def humidity(v) -> str:
+def humidity(v: float | None) -> str:
     if _missing(v):
         return ""
     for hi, bg, fg in ((10, "#f0f0f5", BLACK), (25, "#e0e0eb", BLACK), (50, "#b3b3cc", BLACK),
@@ -134,7 +137,7 @@ CLASS_COLORS = {
 PARTIAL = "color: #898781; font-style: italic"
 
 
-def class_css(cls) -> str:
+def class_css(cls: float | None) -> str:
     if _missing(cls):
         return ""
     bg, fg = CLASS_COLORS[int(cls)]
@@ -152,7 +155,7 @@ HOURLY_WHOLE = {"wind_dir", "cloud_cover", "low_cloud_cover", "cl", "cm", "ch", 
                 "wind_speed", "wind_gust"}
 
 
-def fmt_num(v, digits: int = 1) -> str:
+def fmt_num(v: float | None, digits: int = 1) -> str:
     """Fixed decimals without the "-0.0" that rounding tiny negatives produces."""
     if _missing(v):
         return ""
@@ -177,3 +180,84 @@ def style_frame(df: pd.DataFrame, scales: dict, decimals: int = 1, whole: set[st
     ints = [c for c in num if c in INT_VARS or c in whole or c.endswith("_code")]
     return (sty.format(lambda v: fmt_num(v, decimals), subset=[c for c in num if c not in ints])
                .format(lambda v: fmt_num(v, 0), subset=ints))
+
+
+# --------------------------------------------------- monthly grid (HTML) ---
+
+COL_NAMES = {**{str(i + 1): m for i, m in enumerate(labels.MONTH_ABBR)}, "DJF": "DJF", "MAM": "MAM",
+             "JJA": "JJA", "SON": "SON", "year": "Rok"}
+
+
+def grid_html(grid: dict[str, pd.DataFrame], variable: str, normal_label: str) -> str:
+    """Year × month/season grid as HTML: class colours, record marks, tooltips."""
+    val, cls, part = grid["value"], grid["class"], grid["partial"]
+    hi, lo, dp, dm, an = (grid["is_record_high"], grid["is_record_low"], grid["days_present"],
+                          grid["days_missing"], grid["anomaly"])
+    digits = 0 if variable in INT_VARS else 1
+
+    def cell(y, c):
+        v = val.at[y, c]
+        if pd.isna(v):
+            return ""
+        mark = " ▲" if hi.at[y, c] is True else " ▼" if lo.at[y, c] is True else ""
+        return f"{fmt_num(v, digits)}{mark}"
+
+    shown = pd.DataFrame({c: [cell(y, c) for y in val.index] for c in val.columns}, index=val.index)
+
+    def css(y, c):
+        if pd.isna(val.at[y, c]):
+            return ""
+        if part.at[y, c] is True:
+            return PARTIAL
+        s = class_css(cls.at[y, c])
+        return s + ("; font-weight: 700" if (hi.at[y, c] is True or lo.at[y, c] is True) else "")
+
+    def tip(y, c):
+        if pd.isna(val.at[y, c]):
+            return ""
+        k = cls.at[y, c]
+        parts = [f"{COL_NAMES[c]} {y}: {val.at[y, c]:.{digits}f}",
+                 "niepełny (za dużo braków)" if part.at[y, c] is True else
+                 f"klasa {int(k)}: {labels.CLASS_NAMES[int(k)]}" if pd.notna(k) else "",
+                 "rekord: najwyższa" if hi.at[y, c] is True else "rekord: najniższa" if lo.at[y, c] is True else "",
+                 f"anomalia vs {normal_label}: {an.at[y, c]:+.1f}" if pd.notna(an.at[y, c]) else "",
+                 f"dni z danymi {int(dp.at[y, c])}, braki {int(dm.at[y, c])}"]
+        return html.escape(" · ".join(p for p in parts if p))
+
+    styles = pd.DataFrame({c: [css(y, c) for y in val.index] for c in val.columns}, index=val.index)
+    tips = pd.DataFrame({c: [tip(y, c) for y in val.index] for c in val.columns}, index=val.index)
+    shown.columns = [COL_NAMES[c] for c in shown.columns]
+    styles.columns = tips.columns = shown.columns
+    shown.index.name = None
+    sty = (shown.style.apply(lambda _: styles, axis=None).set_tooltips(tips, props=(
+        "visibility: hidden; position: absolute; z-index: 10; background: #1a1a19; color: #f0efec;"
+        "padding: 4px 8px; border-radius: 4px; font-size: 12px; white-space: nowrap; transform: translate(-40%, 22px);"))
+           .set_table_styles([
+               {"selector": "", "props": "border-collapse: separate; border-spacing: 2px; font-size: 13px;"
+                                         "font-variant-numeric: tabular-nums;"},
+               {"selector": "td", "props": "padding: 3px 6px; text-align: right; border-radius: 3px; min-width: 44px;"},
+               {"selector": "th", "props": "padding: 3px 6px; font-weight: 600; text-align: right;"},
+               {"selector": "td:nth-child(14)", "props": "border-left: 6px solid transparent;"},
+           ]))
+    return f'<div style="overflow-x:auto">{sty.to_html()}</div>'
+
+
+def means_html(means: pd.DataFrame, variable: str) -> str:
+    digits = 0 if variable in INT_VARS else 1
+    m = means.copy()
+    m.columns = [COL_NAMES[c] for c in m.columns]
+    sty = m.style.format(lambda v: fmt_num(v, digits)).set_table_styles([
+        {"selector": "", "props": "border-spacing: 2px; font-size: 13px; font-variant-numeric: tabular-nums;"},
+        {"selector": "td", "props": "padding: 3px 6px; text-align: right; min-width: 44px;"},
+        {"selector": "th", "props": "padding: 3px 6px; text-align: right; font-weight: 600;"}])
+    return f'<div style="overflow-x:auto">{sty.to_html()}</div>'
+
+
+def legend_html() -> str:
+    sw = "".join(
+        f'<span title="{html.escape(labels.CLASS_NAMES[k])}" style="display:inline-block;padding:2px 7px;'
+        f'margin:1px;border-radius:3px;font-size:12px;background:{bg};color:{fg}">{k}</span>'
+        for k, (bg, fg) in CLASS_COLORS.items())
+    return (f'<div style="font-size:12px">{sw} &nbsp; 1 = ekstremalnie wysoka … 6 = normalna … '
+            f'11 = ekstremalnie niska (percentyle całego okresu stacji) · ▲▼ rekord · '
+            f'<i style="color:#898781">kursywa</i> = niepełny</div>')

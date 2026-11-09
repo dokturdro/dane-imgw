@@ -14,9 +14,6 @@ spool directory instead; the next poll or sync ingests them, so nothing is lost.
 
 from __future__ import annotations
 
-import json
-import logging
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -24,10 +21,8 @@ import duckdb
 import httpx
 import pandas as pd
 
-from . import db
+from . import db, spool
 from .config import LIVE_METEO_URL, LIVE_SYNOP_URL, Config
-
-log = logging.getLogger(__name__)
 
 SYNOP_FIELDS = ["temperatura", "predkosc_wiatru", "kierunek_wiatru",
                 "wilgotnosc_wzgledna", "suma_opadu", "cisnienie"]
@@ -91,30 +86,9 @@ def fetch(client: httpx.Client) -> dict:
     }
 
 
-def spool(snap: dict, spool_dir: Path) -> Path:
-    """Save a snapshot for later ingestion (written atomically)."""
-    spool_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.fromisoformat(snap["fetched_at"]).strftime("%Y%m%dT%H%M%S%f")
-    path = spool_dir / f"{stamp}.json"
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(snap), encoding="utf-8")
-    os.replace(tmp, path)
-    return path
-
-
 def drain_spool(con: duckdb.DuckDBPyConnection, spool_dir: Path) -> int:
     """Ingest spooled snapshots oldest first; returns the number of new rows."""
-    added = 0
-    for path in sorted(spool_dir.glob("*.json")):
-        try:
-            snap = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as e:
-            log.warning("unreadable spool file %s (%s), set aside", path.name, e)
-            os.replace(path, path.with_suffix(".bad"))
-            continue
-        added += ingest(con, snap)["new_rows"]
-        path.unlink()
-    return added
+    return sum(ingest(con, snap)["new_rows"] for snap in spool.drain(spool_dir))
 
 
 def ingest(con: duckdb.DuckDBPyConnection, snap: dict) -> dict[str, int]:
@@ -167,14 +141,11 @@ def update(cfg: Config, client: httpx.Client) -> dict:
     try:
         con = db.connect(cfg.db_path)
     except db.DatabaseLocked:
-        return {"spooled_to": str(spool(snap, cfg.live_spool_dir))}
+        stamp = datetime.fromisoformat(snap["fetched_at"])
+        return {"spooled_to": str(spool.save(snap, cfg.live_spool_dir, stamp))}
     with con:
         spooled = drain_spool(con, cfg.live_spool_dir)
         return {**ingest(con, snap), "spooled_rows": spooled}
-
-
-def poll(con: duckdb.DuckDBPyConnection, client: httpx.Client) -> dict[str, int]:
-    return ingest(con, fetch(client))
 
 
 def prune(con: duckdb.DuckDBPyConnection, keep_days: int) -> int:

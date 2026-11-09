@@ -6,8 +6,11 @@ Naming follows dane.meteomodel.pl where it has a name for a field
 
 from __future__ import annotations
 
+import duckdb
 import numpy as np
 import pandas as pd
+
+from .db import table_columns
 
 # --- column maps: IMGW code -> table column -------------------------------
 
@@ -93,12 +96,12 @@ def _snow_codes(df: pd.DataFrame, col: str = "snow_depth") -> pd.DataFrame:
     return df
 
 
-def rebuild_qc(con) -> int:
+def rebuild_qc(con: duckdb.DuckDBPyConnection) -> int:
     """Recompute qc_issues: out-of-range values and tx < tn. Values stay in the
     data tables; this table lists them so a dashboard can grey them out."""
     parts = []
     for tbl, tcol in (("daily_obs", "date"), ("hourly_obs", "ts")):
-        cols = {r[0] for r in con.execute(f"DESCRIBE {tbl}").fetchall()}
+        cols = set(table_columns(con, tbl))
         for var, (lo, hi) in RANGES.items():
             if var in cols:
                 parts.append(

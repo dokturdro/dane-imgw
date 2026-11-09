@@ -12,23 +12,20 @@ direction, which messages round to 10°.
 
 from __future__ import annotations
 
-import json
 import logging
 import math
-import os
 import re
 import time
+import warnings
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import duckdb
 import httpx
 import pandas as pd
-import warnings
-
 from pymetdecoder import synop as pmd
 
-from . import db
+from . import db, spool
 from .config import Config
 
 # consistency notes about cloud groups, not errors
@@ -79,7 +76,7 @@ def fetch(client: httpx.Client, begin: datetime, end: datetime, pause: float = P
 
 # ----------------------------------------------------------------- decoding ---
 
-def _v(d: dict | None, *path):
+def _get(d: dict | None, *path: str | int):
     for p in path:
         if d is None:
             return None
@@ -106,72 +103,72 @@ def decode(line: str) -> dict | None:
         return None
     msg = msg.strip().rstrip("=").rstrip() + "="
     try:
-        s = pmd.SYNOP().decode(msg)
+        report = pmd.SYNOP().decode(msg)
     except Exception as e:  # malformed message
         log.debug("undecodable %s %s: %s", wmo, ts, e)
         return None
 
-    tm = _v(s, "air_temperature", "value")
-    td = _v(s, "dewpoint_temperature", "value")
+    tm = _get(report, "air_temperature", "value")
+    td = _get(report, "dewpoint_temperature", "value")
     e = _vapour_pressure(td)
     es = _vapour_pressure(tm)
     rh = min(100.0, 100 * e / es) if e is not None and es else None
 
-    wind = s.get("surface_wind") or {}
-    wdir = None if _v(wind, "direction", "calm") else _v(wind, "direction", "value")
-    if _v(wind, "direction", "calm"):
+    wind = report.get("surface_wind") or {}
+    wdir = None if _get(wind, "direction", "calm") else _get(wind, "direction", "value")
+    if _get(wind, "direction", "calm"):
         wdir = 0
-    unit = _v(s, "wind_indicator", "unit")
-    wspd = _v(wind, "speed", "value")
-    kt = 0.514444 if unit == "KT" else 1.0
-    wspd = None if wspd is None else round(wspd * kt, 1)
+    unit = _get(report, "wind_indicator", "unit")
+    wspd = _get(wind, "speed", "value")
+    speed_factor = 0.514444 if unit == "KT" else 1.0
+    wspd = None if wspd is None else round(wspd * speed_factor, 1)
 
     # precipitation: section 1 group 6RRRt; indicator 3 = omitted because none fell
-    p = s.get("precipitation_s1")
-    p_amt = _v(p, "amount", "value")
-    p_per = _v(p, "time_before_obs", "value")
-    if p is None and _v(s, "precipitation_indicator", "value") == 3:
+    p = report.get("precipitation_s1")
+    p_amt = _get(p, "amount", "value")
+    p_per = _get(p, "time_before_obs", "value")
+    if p is None and _get(report, "precipitation_indicator", "value") == 3:
         p_amt, p_per = 0.0, (12 if ts.hour in (6, 18) else 6)
-    if p is not None and _v(p, "amount", "trace"):
+    if p is not None and _get(p, "amount", "trace"):
         p_amt = 0.0
-    p24 = _v(s, "precipitation_24h", "amount", "value")
-    if _v(s, "precipitation_24h", "amount", "trace"):
+    p24 = _get(report, "precipitation_24h", "amount", "value")
+    if _get(report, "precipitation_24h", "amount", "trace"):
         p24 = 0.0
 
     sec3 = (_SEC3.search(msg) or [None, ""])[1]
     gust = _GUST.search(sec3)
     sun = None
-    for item in s.get("sunshine") or []:
-        if _v(item, "duration", "value") == 24:
-            sun = _v(item, "amount", "value")
+    for item in report.get("sunshine") or []:
+        if _get(item, "duration", "value") == 24:
+            sun = _get(item, "amount", "value")
     if sun is None and (m := _SUN24.search(sec3)) and ts.hour == 6:
         sun = int(m[1]) / 10
 
-    ct = s.get("cloud_types") or {}
-    vis = _v(s, "visibility", "value")
+    ct = report.get("cloud_types") or {}
+    vis = _get(report, "visibility", "value")
     # snow depth (4E'sss, 06 UTC): codes as in the archive; group omitted = no snow
-    snow = _v(s, "ground_state_snow", "depth", "depth")
-    if _v(s, "ground_state_snow", "depth", "impossible") or snow in (998, 999):
+    snow = _get(report, "ground_state_snow", "depth", "depth")
+    if _get(report, "ground_state_snow", "depth", "impossible") or snow in (998, 999):
         snow = None
     elif snow == 997:
         snow = 0.25
-    elif snow is None and "ground_state_snow" not in s and ts.hour == 6:
+    elif snow is None and "ground_state_snow" not in report and ts.hour == 6:
         snow = 0.0
 
     return dict(
         wmo_id=wmo, ts=ts, raw=msg,
         tm=tm, td=td, rh=None if rh is None else round(rh, 1), vapp=None if e is None else round(e, 1),
-        ppp=_v(s, "station_pressure", "value"), mslp=_v(s, "sea_level_pressure", "value"),
-        p_tendency=_v(s, "pressure_tendency", "change", "value"),
+        ppp=_get(report, "station_pressure", "value"), mslp=_get(report, "sea_level_pressure", "value"),
+        p_tendency=_get(report, "pressure_tendency", "change", "value"),
         wind_dir=wdir, wind_speed=wspd,
-        wind_gust=None if not gust else round(int(gust[1]) * kt, 1),
-        cloud_cover=_v(s, "cloud_cover", "value"), low_cloud_cover=_v(ct, "low_cloud_amount", "value"),
-        cl=_v(ct, "low_cloud_type", "value"), cm=_v(ct, "middle_cloud_type", "value"),
-        ch=_v(ct, "high_cloud_type", "value"),
-        visib_obs_m=vis, ww=_v(s, "present_weather", "value"),
-        w1=_v((s.get("past_weather") or [None])[0], "value"),
+        wind_gust=None if not gust else round(int(gust[1]) * speed_factor, 1),
+        cloud_cover=_get(report, "cloud_cover", "value"), low_cloud_cover=_get(ct, "low_cloud_amount", "value"),
+        cl=_get(ct, "low_cloud_type", "value"), cm=_get(ct, "middle_cloud_type", "value"),
+        ch=_get(ct, "high_cloud_type", "value"),
+        visib_obs_m=vis, ww=_get(report, "present_weather", "value"),
+        w1=_get((report.get("past_weather") or [None])[0], "value"),
         prcp=p_amt, prcp_period_h=p_per, prcp_24h=p24,
-        tx_12h=_v(s, "maximum_temperature", "value"), tn_12h=_v(s, "minimum_temperature", "value"),
+        tx_12h=_get(report, "maximum_temperature", "value"), tn_12h=_get(report, "minimum_temperature", "value"),
         # 3EsTgTg carries the ground minimum in whole degrees only, too coarse next to the archive
         tng_12h=None,
         snow_depth=snow if ts.hour == 6 else None, sunshine_24h=sun,
@@ -233,7 +230,7 @@ def ingest(con: duckdb.DuckDBPyConnection, df: pd.DataFrame) -> int:
     if df.empty:
         return 0
     df["received_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
-    cols = [c for c in (r[0] for r in con.execute("DESCRIBE synop_msg_obs").fetchall()) if c in df.columns]
+    cols = [c for c in db.table_columns(con, "synop_msg_obs") if c in df.columns]
     con.register("_syn", df[cols])
     try:
         con.begin()
@@ -274,27 +271,8 @@ def prune(con: duckdb.DuckDBPyConnection) -> int:
 
 # --------------------------------------------- spooling while the DB is busy ---
 
-def spool(lines: list[str], spool_dir: Path) -> Path:
-    spool_dir.mkdir(parents=True, exist_ok=True)
-    path = spool_dir / f"{datetime.now(timezone.utc):%Y%m%dT%H%M%S%f}.json"
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(lines), encoding="utf-8")
-    os.replace(tmp, path)
-    return path
-
-
 def drain_spool(con: duckdb.DuckDBPyConnection, spool_dir: Path) -> int:
-    n = 0
-    for path in sorted(spool_dir.glob("*.json")):
-        try:
-            lines = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as e:
-            log.warning("unreadable spool file %s (%s), set aside", path.name, e)
-            os.replace(path, path.with_suffix(".bad"))
-            continue
-        n += ingest(con, decode_all(lines))
-        path.unlink()
-    return n
+    return sum(ingest(con, decode_all(lines)) for lines in spool.drain(spool_dir))
 
 
 # ------------------------------------------------------------------- update ---
@@ -319,7 +297,7 @@ def update(cfg: Config, client: httpx.Client, days: int | None = None) -> dict:
     try:
         con = db.connect(cfg.db_path)
     except db.DatabaseLocked:
-        return {**out, "spooled_to": str(spool(lines, spool_dir))}
+        return {**out, "spooled_to": str(spool.save(lines, spool_dir, now))}
     with con:
         spooled = drain_spool(con, spool_dir)
         stored = ingest(con, decode_all(lines))

@@ -8,6 +8,7 @@ import altair as alt
 import pandas as pd
 
 from imgw.dash import style
+from imgw.dash.labels import MONTH_ABBR
 
 LOCAL_TZ = "Europe/Warsaw"
 
@@ -29,7 +30,6 @@ def utc_offset_label(dates: pd.Series) -> str:
     return "UTC" + "/".join(f"+{h}" for h in hours) if hours else "UTC"
 
 
-MONTH_ABBR = ["sty", "lut", "mar", "kwi", "maj", "cze", "lip", "sie", "wrz", "paź", "lis", "gru"]
 RAIN_STOPS_MM = [0, 2.5, 10, 22.5, 40]  # daily totals pinned to each THEMES "rain" colour
 
 THEMES = {
@@ -46,23 +46,23 @@ THEMES = {
 }
 
 
-def _style(chart, t: dict):
+def _style(chart, palette: dict):
     # configure() replaces the whole config, so it has to come before the specific configure_* calls
     return (chart.configure(background="transparent")
             .configure_view(stroke=None)
-            .configure_axis(gridColor=t["grid"], domainColor=t["axis"], tickColor=t["axis"],
-                            labelColor=t["ink2"], titleColor=t["ink2"], labelFontSize=11,
+            .configure_axis(gridColor=palette["grid"], domainColor=palette["axis"], tickColor=palette["axis"],
+                            labelColor=palette["ink2"], titleColor=palette["ink2"], labelFontSize=11,
                             titleFontSize=11, titleFontWeight="normal")
-            .configure_legend(labelColor=t["ink2"], titleColor=t["ink2"], orient="top"))
+            .configure_legend(labelColor=palette["ink2"], titleColor=palette["ink2"], orient="top"))
 
 
-def _cfg(chart: alt.Chart, t: dict, height: int) -> alt.Chart:
-    return _style(chart.properties(height=height, width="container"), t)
+def _cfg(chart: alt.Chart, palette: dict, height: int) -> alt.Chart:
+    return _style(chart.properties(height=height, width="container"), palette)
 
 
-def daily_temperature(df: pd.DataFrame, normal: pd.DataFrame | None, theme: str) -> alt.Chart:
+def daily_temperature(df: pd.DataFrame, normal: pd.DataFrame | None, normal_label: str, theme: str) -> alt.Chart:
     """tn-tx band, tm line, normal tm as a dashed step line."""
-    t = THEMES[theme]
+    palette = THEMES[theme]
     d = df[["date", "tm", "tx", "tn"]].copy()
     d["date"] = pd.to_datetime(d["date"])
     base = alt.Chart(d).encode(x=alt.X("date:T", title=None, axis=alt.Axis(format="%d.%m")))
@@ -70,28 +70,28 @@ def daily_temperature(df: pd.DataFrame, normal: pd.DataFrame | None, theme: str)
            alt.Tooltip("tm:Q", title="Tśr", format=".1f"),
            alt.Tooltip("tx:Q", title="Tmax", format=".1f"),
            alt.Tooltip("tn:Q", title="Tmin", format=".1f")]
-    band = base.mark_area(opacity=0.25, color=t["s1"]).encode(
+    band = base.mark_area(opacity=0.25, color=palette["s1"]).encode(
         y=alt.Y("tn:Q", title="°C", scale=alt.Scale(zero=False)), y2="tx:Q")
-    line = base.mark_line(strokeWidth=2, color=t["s1"]).encode(y="tm:Q")
+    line = base.mark_line(strokeWidth=2, color=palette["s1"]).encode(y="tm:Q")
     hover = alt.selection_point(fields=["date"], nearest=True, on="pointerover", empty=False)
-    pts = base.mark_point(size=60, filled=True, color=t["s1"]).encode(
+    pts = base.mark_point(size=60, filled=True, color=palette["s1"]).encode(
         y="tm:Q", opacity=alt.condition(hover, alt.value(1), alt.value(0)), tooltip=tip
     ).add_params(hover)
-    rule = base.mark_rule(color=t["muted"]).encode(
+    rule = base.mark_rule(color=palette["muted"]).encode(
         opacity=alt.condition(hover, alt.value(0.6), alt.value(0))).transform_filter(hover)
     layers = [band, line, rule, pts]
     if normal is not None and not normal.empty:
         n = normal.copy()
         n["date"] = pd.to_datetime(n["date"])
-        layers.insert(0, alt.Chart(n).mark_line(strokeDash=[4, 3], strokeWidth=1.5, color=t["muted"],
+        layers.insert(0, alt.Chart(n).mark_line(strokeDash=[4, 3], strokeWidth=1.5, color=palette["muted"],
                                                 interpolate="step-after").encode(
             x="date:T", y="normal:Q",
-            tooltip=[alt.Tooltip("normal:Q", title="norma Tśr 1991–2020", format=".1f")]))
-    return _cfg(alt.layer(*layers), t, 220)
+            tooltip=[alt.Tooltip("normal:Q", title=f"norma Tśr {normal_label}", format=".1f")]))
+    return _cfg(alt.layer(*layers), palette, 220)
 
 
 def daily_precip(df: pd.DataFrame, theme: str) -> alt.Chart:
-    t = THEMES[theme]
+    palette = THEMES[theme]
     d = df[["date", "prcp"]].copy()
     d["date"] = pd.to_datetime(d["date"])
     d["cum"] = d["prcp"].fillna(0).cumsum()
@@ -103,10 +103,10 @@ def daily_precip(df: pd.DataFrame, theme: str) -> alt.Chart:
         y=alt.Y("prcp:Q", title="opad [mm]"), y2=alt.datum(0),
         # fixed mm stops, so a shade means the same rainfall whatever the date range
         color=alt.Color("prcp:Q", legend=None, scale=alt.Scale(
-            domain=RAIN_STOPS_MM, range=t["rain"], clamp=True)),
+            domain=RAIN_STOPS_MM, range=palette["rain"], clamp=True)),
         tooltip=[alt.Tooltip("date:T", title="data", format="%Y-%m-%d"),
                  alt.Tooltip("prcp:Q", title="opad", format=".1f")])
-    cum = alt.Chart(d).mark_line(strokeWidth=2, color=t["s1"]).encode(
+    cum = alt.Chart(d).mark_line(strokeWidth=2, color=palette["s1"]).encode(
         x=alt.X("date:T", title=None, axis=alt.Axis(format="%d.%m")),
         y=alt.Y("cum:Q", title="suma [mm]"),
         tooltip=[alt.Tooltip("date:T", title="data", format="%Y-%m-%d"),
@@ -114,14 +114,14 @@ def daily_precip(df: pd.DataFrame, theme: str) -> alt.Chart:
     # two charts, two axes — never a dual axis
     return _style(alt.vconcat(bars.properties(height=130, width="container"),
                         cum.properties(height=100, width="container"))
-            .resolve_scale(x="shared"), t)
+            .resolve_scale(x="shared"), palette)
 
 
-def _frost(t: dict, scale: str = "y", height: str = "height") -> alt.Chart:
+def _frost(palette: dict, scale: str = "y", height: str = "height") -> alt.Chart:
     """Sub-zero shading, positioned from the y scale so it can't stretch the axis to reach 0:
     clamped to the plot, it collapses to nothing when 0 lies below the visible range."""
     return alt.Chart(alt.Data(values=[{}])).mark_rect(
-        color=t["frost"], x=0, x2=alt.expr("range('x')[1]"),
+        color=palette["frost"], x=0, x2=alt.expr("range('x')[1]"),
         y=alt.expr(f"clamp(scale('{scale}', 0), 0, {height})"), y2=alt.expr(height))
 
 
@@ -169,9 +169,9 @@ def hourly_temperature(df: pd.DataFrame, theme: str, forecast: pd.DataFrame | No
     ``forecast``: the latest forecast after the last observation (temperature and dew point);
     ``sun``: sunrise / sunset times, nights greyed out.
     """
-    t = THEMES[theme]
+    palette = THEMES[theme]
     d = _melt(df)
-    series = alt.Scale(domain=[*SERIES.values(), FC_T], range=[t["s1"], t["s2"], t["s3"]])
+    series = alt.Scale(domain=[*SERIES.values(), FC_T], range=[palette["s1"], palette["s2"], palette["s3"]])
     color = alt.Color("series:N", title=None, scale=series)
     # hours below (every 3 h); the date sits on top, once per day, over its midnight separator
     axis = alt.Axis(format="%H", labelAngle=0, labelOverlap=False, values=_ticks("3h", d, forecast))
@@ -186,18 +186,18 @@ def hourly_temperature(df: pd.DataFrame, theme: str, forecast: pd.DataFrame | No
         tooltip=[alt.Tooltip("date:T", title="czas", format="%Y-%m-%d %H:%M"),
                  alt.Tooltip("series:N", title="seria"), alt.Tooltip("value:Q", format=".1f", title="°C")])
     # temperature labels above its dots, dew point below, so the two series don't collide
-    text = [base.mark_text(dy=dy, fontSize=9, color=t["ink2"]).encode(text=alt.Text("value:Q", format=".1f"))
+    text = [base.mark_text(dy=dy, fontSize=9, color=palette["ink2"]).encode(text=alt.Text("value:Q", format=".1f"))
             .transform_filter(alt.datum.series == s) for s, dy in (("temperatura", -10), ("punkt rosy", 11))]
-    layers = [*_night_layer(t, sun, axis, d, forecast), _frost(t)]
+    layers = [*_night_layer(palette, sun, axis, d, forecast), _frost(palette)]
     if not d.empty:
-        layers.append(alt.Chart(_midnights(d, forecast)).mark_rule(color=t["muted"], strokeWidth=1.5, strokeDash=[6, 4])
+        layers.append(alt.Chart(_midnights(d, forecast)).mark_rule(color=palette["muted"], strokeWidth=1.5, strokeDash=[6, 4])
                       .encode(x=x))
         layers.append(alt.Chart(_midnights(d, forecast, include_start=True)).mark_text(
-            baseline="bottom", dy=-4, fontSize=11, fontWeight="bold", color=t["ink2"]).encode(
+            baseline="bottom", dy=-4, fontSize=11, fontWeight="bold", color=palette["ink2"]).encode(
             x=x, y=alt.value(0), text=alt.Text("date:T", format="%d.%m")))
     layers += [line, dots, *text]
     if d.empty:
-        return _cfg(alt.layer(*layers), t, 260)
+        return _cfg(alt.layer(*layers), palette, 260)
 
     last_obs = d["date"].max()
     fc_parts = []
@@ -225,13 +225,13 @@ def hourly_temperature(df: pd.DataFrame, theme: str, forecast: pd.DataFrame | No
             **fenc, tooltip=[alt.Tooltip("date:T", title="czas", format="%Y-%m-%d %H:%M"),
                              alt.Tooltip("run:N", title="prognoza"),
                              alt.Tooltip("value:Q", format=".1f", title="T °C")]))
-        layers.append(alt.Chart(f).mark_text(dy=-10, fontSize=9, color=t["fc_label"]).encode(
+        layers.append(alt.Chart(f).mark_text(dy=-10, fontSize=9, color=palette["fc_label"]).encode(
             x=x, y="value:Q", text=alt.Text("value:Q", format=".1f")))
     if have_ahead:   # where the readings end and the latest forecast takes over
         layers.append(alt.Chart(pd.DataFrame({"date": [last_obs]})).mark_rule(
-            color=t["now_rule"], strokeWidth=1.5, strokeDash=[2, 2]).encode(x=x))
-    layers += _hover_columns(t, axis, d, f if fc_parts else None)
-    return _cfg(alt.layer(*layers), t, 260)
+            color=palette["now_rule"], strokeWidth=1.5, strokeDash=[2, 2]).encode(x=x))
+    layers += _hover_columns(palette, axis, d, f if fc_parts else None)
+    return _cfg(alt.layer(*layers), palette, 260)
 
 
 HOVER_FIELDS = [("temperatura", "temperatura"), ("prognoza T", "prognoza"), ("punkt rosy", "punkt rosy")]
@@ -249,7 +249,7 @@ def hover_table(obs: pd.DataFrame, fc_t: pd.DataFrame | None) -> pd.DataFrame:
     return out
 
 
-def _hover_columns(t: dict, axis: alt.Axis, obs, fc_t) -> list[alt.Chart]:
+def _hover_columns(palette: dict, axis: alt.Axis, obs, fc_t) -> list[alt.Chart]:
     """Invisible one-hour columns: hovering anywhere over an hour shows all its values and a guide line."""
     h = hover_table(obs, fc_t)
     half = pd.Timedelta(minutes=30)     # clipped to the data, so the columns don't widen the x axis
@@ -258,7 +258,7 @@ def _hover_columns(t: dict, axis: alt.Axis, obs, fc_t) -> list[alt.Chart]:
     hover = alt.selection_point(fields=["date"], on="pointerover", clear="pointerout", empty=False)
     tip = [alt.Tooltip("date:T", title="czas", format="%d.%m %H:%M"),
            *[alt.Tooltip(f"{col}:N", title=title) for col, title in HOVER_FIELDS]]
-    guide = alt.Chart(h).mark_rule(color=t["muted"], strokeWidth=1).encode(
+    guide = alt.Chart(h).mark_rule(color=palette["muted"], strokeWidth=1).encode(
         x=alt.X("date:T", axis=axis, title=None),
         opacity=alt.condition(hover, alt.value(0.7), alt.value(0)))
     # a rect with only x/x2 fills the plot's height; Vega doesn't hover marks at opacity 0, so 0.001
@@ -292,7 +292,7 @@ def nights(sun: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> pd.Data
     return n[n["end"] > n["start"]].reset_index(drop=True)
 
 
-def _night_layer(t: dict, sun: pd.DataFrame | None, axis: alt.Axis, *frames: pd.DataFrame) -> list[alt.Chart]:
+def _night_layer(palette: dict, sun: pd.DataFrame | None, axis: alt.Axis, *frames: pd.DataFrame) -> list[alt.Chart]:
     """Grey night rects over the frames' time span (empty list without sun times)."""
     frames = [f for f in frames if f is not None and not f.empty]
     if sun is None or sun.empty or not frames:
@@ -300,15 +300,15 @@ def _night_layer(t: dict, sun: pd.DataFrame | None, axis: alt.Axis, *frames: pd.
     dates = pd.concat([pd.to_datetime(f["date"]) for f in frames])
     n = nights(sun, dates.min(), dates.max())
     # a rect with only x/x2 fills the panel's whole height
-    return [alt.Chart(n).mark_rect(color=t["night"]).encode(x=alt.X("start:T", title=None, axis=axis), x2="end:T")]
+    return [alt.Chart(n).mark_rect(color=palette["night"]).encode(x=alt.X("start:T", title=None, axis=axis), x2="end:T")]
 
 
 def forecast_chart(df: pd.DataFrame, theme: str, sun: pd.DataFrame | None = None) -> alt.Chart:
     """Whole hourly forecast: temperature and dew point above hourly precipitation bars;
     ``sun`` greys out the nights."""
-    t = THEMES[theme]
+    palette = THEMES[theme]
     d = _melt(df)
-    series = alt.Scale(domain=list(SERIES.values()), range=[t["s1"], t["s2"]])
+    series = alt.Scale(domain=list(SERIES.values()), range=[palette["s1"], palette["s2"]])
     # one tick, label and grid line per day, at its midnight
     axis = alt.Axis(format="%d.%m", labelAngle=0, labelOverlap=False, values=_ticks("D", d))
     x = alt.X("date:T", title=None, axis=axis)
@@ -321,22 +321,22 @@ def forecast_chart(df: pd.DataFrame, theme: str, sun: pd.DataFrame | None = None
         tooltip=[alt.Tooltip("date:T", title="czas", format="%Y-%m-%d %H:%M"),
                  alt.Tooltip("series:N", title="seria"), alt.Tooltip("value:Q", format=".1f", title="°C")]
     ).add_params(hover)
-    rule = base.mark_rule(color=t["muted"]).encode(
+    rule = base.mark_rule(color=palette["muted"]).encode(
         opacity=alt.condition(hover, alt.value(0.6), alt.value(0))).transform_filter(hover)
     ext = daily_extremes(d[d["series"] == "temperatura"])
     etip = [alt.Tooltip("date:T", title="czas", format="%Y-%m-%d %H:%M"),
             alt.Tooltip("kind:N", title=""), alt.Tooltip("value:Q", format=".1f", title="°C")]
-    edots = alt.Chart(ext).mark_point(size=45, filled=True, opacity=1, color=t["s1"]).encode(
+    edots = alt.Chart(ext).mark_point(size=45, filled=True, opacity=1, color=palette["s1"]).encode(
         x=x, y="value:Q", tooltip=etip)
-    elabels = [alt.Chart(ext[ext["kind"] == k]).mark_text(dy=dy, fontSize=10, color=t["ink2"]).encode(
+    elabels = [alt.Chart(ext[ext["kind"] == k]).mark_text(dy=dy, fontSize=10, color=palette["ink2"]).encode(
         x=x, y="value:Q", text=alt.Text("value:Q", format=".1f")) for k, dy in (("Tmax dzień", -10), ("Tmin noc", 12))]
-    shade = _night_layer(t, sun, axis, d)
-    top = alt.layer(*shade, _frost(t, "fc_temp_y", "fc_temp_height"), lines, edots, *elabels, rule, pts).properties(name="fc_temp", height=220, width="container")
+    shade = _night_layer(palette, sun, axis, d)
+    top = alt.layer(*shade, _frost(palette, "fc_temp_y", "fc_temp_height"), lines, edots, *elabels, rule, pts).properties(name="fc_temp", height=220, width="container")
 
     p = df[["date", "prcp"]].copy()
     p["date"] = pd.to_datetime(p["date"])
     p["start"] = p["date"] - pd.Timedelta(hours=1)    # Open-Meteo sums the preceding hour
-    bars = alt.Chart(p[p["prcp"] > 0]).mark_bar(color=t["s1"]).encode(
+    bars = alt.Chart(p[p["prcp"] > 0]).mark_bar(color=palette["s1"]).encode(
         x=alt.X("start:T", title=None, axis=axis), x2="date:T",
         y=alt.Y("prcp:Q", title="opad [mm/h]"), y2=alt.datum(0),
         tooltip=[alt.Tooltip("date:T", title="godzina do", format="%Y-%m-%d %H:%M"),
@@ -345,68 +345,70 @@ def forecast_chart(df: pd.DataFrame, theme: str, sun: pd.DataFrame | None = None
     if shade:
         bars = alt.layer(*shade, bars).properties(height=90, width="container")
     # two charts, two axes — never a dual axis
-    return _style(alt.vconcat(top, bars).resolve_scale(x="shared"), t)
+    return _style(alt.vconcat(top, bars).resolve_scale(x="shared"), palette)
 
 
 def climograph(year_vals: pd.DataFrame, normals: pd.DataFrame, theme: str, unit: str,
                label: str, bars: bool = False) -> alt.Chart:
-    """One variable for one year vs the 1991-2020 normal (mean ± sd band)."""
-    t = THEMES[theme]
+    """One variable for one year vs the normal (mean ± sd band)."""
+    palette = THEMES[theme]
     n = normals.assign(lo=normals["mean"] - normals["sd"], hi=normals["mean"] + normals["sd"],
                        m=normals["month"].map(lambda m: MONTH_ABBR[m - 1]))
     y = year_vals.assign(m=year_vals["month"].map(lambda m: MONTH_ABBR[m - 1]))
     x = alt.X("m:N", sort=MONTH_ABBR, title=None, axis=alt.Axis(labelAngle=0))
     ntip = [alt.Tooltip("m:N", title="miesiąc"), alt.Tooltip("mean:Q", title="norma", format=".1f"),
             alt.Tooltip("sd:Q", title="odch. std.", format=".1f")]
-    band = alt.Chart(n).mark_area(color=t["band"], opacity=0.8).encode(
+    band = alt.Chart(n).mark_area(color=palette["band"], opacity=0.8).encode(
         x=x, y=alt.Y("lo:Q", title=unit, scale=alt.Scale(zero=bars)), y2="hi:Q", tooltip=ntip)
     ytip = [alt.Tooltip("m:N", title="miesiąc"), alt.Tooltip("value:Q", title=label, format=".1f"),
             alt.Tooltip("is_partial:N", title="niepełny")]
     if bars:
-        layers = [alt.Chart(y).mark_bar(color=t["s1"], opacity=0.85, size=18,
+        layers = [alt.Chart(y).mark_bar(color=palette["s1"], opacity=0.85, size=18,
                                         cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
                       x=x, y=alt.Y("value:Q", title=unit), tooltip=ytip),
-                  alt.Chart(n).mark_tick(color=t["ink"], thickness=2, size=24).encode(
+                  alt.Chart(n).mark_tick(color=palette["ink"], thickness=2, size=24).encode(
                       x=x, y="mean:Q", tooltip=ntip)]
     else:
         layers = [band,
-                  alt.Chart(n).mark_line(color=t["muted"], strokeWidth=1.5, strokeDash=[4, 3]).encode(
+                  alt.Chart(n).mark_line(color=palette["muted"], strokeWidth=1.5, strokeDash=[4, 3]).encode(
                       x=x, y="mean:Q", tooltip=ntip),
-                  alt.Chart(y).mark_line(color=t["s1"], strokeWidth=2,
+                  alt.Chart(y).mark_line(color=palette["s1"], strokeWidth=2,
                                          point=alt.OverlayMarkDef(size=70, filled=True)).encode(
                       x=x, y="value:Q", tooltip=ytip)]
-    return _cfg(alt.layer(*layers), t, 240)
+    return _cfg(alt.layer(*layers), palette, 240)
 
 
 def stripes(df: pd.DataFrame, theme: str) -> alt.Chart:
-    """Warming stripes: annual anomaly vs 1991-2020, diverging around 0."""
-    t = THEMES[theme]
+    """Warming stripes: annual anomaly vs the normal, diverging around 0."""
+    palette = THEMES[theme]
     lim = max(abs(df["anomaly"].min()), abs(df["anomaly"].max()), 0.5)
     tip = [alt.Tooltip("year:O", title="rok"), alt.Tooltip("value:Q", title="Tśr", format=".1f"),
            alt.Tooltip("anomaly:Q", title="anomalia", format="+.1f")]
     color = alt.Color("anomaly:Q", title="anomalia [°C]",
-                      scale=alt.Scale(domain=[-lim, 0, lim], range=t["div"], interpolate="lab"))
+                      scale=alt.Scale(domain=[-lim, 0, lim], range=palette["div"], interpolate="lab"))
     strip = alt.Chart(df).mark_rect().encode(
         x=alt.X("year:O", title=None, axis=alt.Axis(labelAngle=0, values=[y for y in df["year"] if y % 5 == 0])),
         color=color, tooltip=tip).properties(height=90, width="container")
     bars = alt.Chart(df).mark_bar(cornerRadius=2).encode(
         x=alt.X("year:O", title=None, axis=alt.Axis(labelAngle=0, values=[y for y in df["year"] if y % 5 == 0])),
         y=alt.Y("anomaly:Q", title="anomalia [°C]"), color=alt.Color("anomaly:Q", scale=alt.Scale(
-            domain=[-lim, 0, lim], range=t["div"], interpolate="lab"), legend=None), tooltip=tip
+            domain=[-lim, 0, lim], range=palette["div"], interpolate="lab"), legend=None), tooltip=tip
     ).properties(height=160, width="container")
     ext = df.loc[[df["anomaly"].idxmax(), df["anomaly"].idxmin()]]
-    labels = alt.Chart(ext).mark_text(dy=-8, color=t["ink2"], fontSize=11).encode(
+    extreme_labels = alt.Chart(ext).mark_text(dy=-8, color=palette["ink2"], fontSize=11).encode(
         x="year:O", y="anomaly:Q", text=alt.Text("anomaly:Q", format="+.1f"))
-    return _style(alt.vconcat(strip, alt.layer(bars, labels)), t)
+    return _style(alt.vconcat(strip, alt.layer(bars, extreme_labels)), palette)
 
 
-def cumulative(cum: pd.DataFrame, year: int, theme: str) -> alt.Chart:
-    """Selected year's running precipitation vs mean 1991-2020 curve; driest/wettest as grey context."""
-    t = THEMES[theme]
+def cumulative(cum: pd.DataFrame, year: int, normal_period: tuple[int, int], theme: str) -> alt.Chart:
+    """Selected year's running precipitation vs the normal period's mean curve; driest/wettest as grey context."""
+    palette = THEMES[theme]
     totals = cum.groupby("year")["cum"].max()
     full = totals[totals.index < pd.Timestamp.today().year]
-    normal = (cum[cum["year"].between(1991, 2020)].groupby("doy")["cum"].mean().reset_index()
-              .assign(series="średnia 1991–2020"))
+    y0, y1 = normal_period
+    mean_label = f"średnia {y0}–{y1}"
+    normal = (cum[cum["year"].between(y0, y1)].groupby("doy")["cum"].mean().reset_index()
+              .assign(series=mean_label))
     parts = [normal]
     if len(full):
         for label, y in ((f"najsuchszy ({full.idxmin()})", full.idxmin()),
@@ -419,13 +421,13 @@ def cumulative(cum: pd.DataFrame, year: int, theme: str) -> alt.Chart:
            alt.Tooltip("cum:Q", title="suma [mm]", format=".0f")]
     grey = alt.Chart(ctx).mark_line(strokeWidth=1.5).encode(
         x=x, y=alt.Y("cum:Q", title="suma opadu [mm]"),
-        color=alt.Color("series:N", legend=None, scale=alt.Scale(range=[t["muted"], t["context"], t["context"]])),
-        strokeDash=alt.condition(alt.datum.series == "średnia 1991–2020", alt.value([4, 3]), alt.value([1, 0])),
+        color=alt.Color("series:N", legend=None, scale=alt.Scale(range=[palette["muted"], palette["context"], palette["context"]])),
+        strokeDash=alt.condition(alt.datum.series == mean_label, alt.value([4, 3]), alt.value([1, 0])),
         tooltip=tip)
     end = ctx.groupby("series").tail(1)
-    glabels = alt.Chart(end).mark_text(align="left", dx=4, color=t["muted"], fontSize=11).encode(
+    glabels = alt.Chart(end).mark_text(align="left", dx=4, color=palette["muted"], fontSize=11).encode(
         x=x, y="cum:Q", text="series:N")
-    main = alt.Chart(sel).mark_line(strokeWidth=2.5, color=t["s1"]).encode(x=x, y="cum:Q", tooltip=tip)
-    mlabel = alt.Chart(sel.tail(1)).mark_text(align="left", dx=4, color=t["ink"], fontWeight="bold").encode(
+    main = alt.Chart(sel).mark_line(strokeWidth=2.5, color=palette["s1"]).encode(x=x, y="cum:Q", tooltip=tip)
+    mlabel = alt.Chart(sel.tail(1)).mark_text(align="left", dx=4, color=palette["ink"], fontWeight="bold").encode(
         x=x, y="cum:Q", text="series:N")
-    return _cfg(alt.layer(grey, glabels, main, mlabel), t, 300)
+    return _cfg(alt.layer(grey, glabels, main, mlabel), palette, 300)

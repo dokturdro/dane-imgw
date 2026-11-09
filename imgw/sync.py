@@ -43,7 +43,7 @@ def load_stations(con: duckdb.DuckDBPyConnection, client: httpx.Client) -> int:
     return len(df)
 
 
-def _load_file(con, rf: crawl.RemoteFile, data: bytes) -> dict[str, int]:
+def _load_file(con: duckdb.DuckDBPyConnection, data: bytes) -> dict[str, int]:
     frames = read_zip(data)
     counts: dict[str, int] = {}
     con.execute("BEGIN")
@@ -99,7 +99,7 @@ def sync(
             data, sha = fetch_cached(client, rf.url, cfg.raw_dir, cfg.keep_raw,
                                      refresh=force or rf.url in seen_before,
                                      delay=cfg.request_delay)
-            counts = _load_file(con, rf, data)
+            counts = _load_file(con, data)
             db.log_sync(con, rf.url, rf.fingerprint, sha, sum(counts.values()), "ok")
             for k, v in counts.items():
                 res.rows[k] = res.rows.get(k, 0) + v
