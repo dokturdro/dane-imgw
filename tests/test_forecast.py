@@ -107,3 +107,22 @@ def test_sun_times_match_open_meteo_for_opole():
     assert abs(st["sunrise"] - pd.Timestamp("2026-11-07 05:49")) <= pd.Timedelta(minutes=3)
     assert abs(st["sunset"] - pd.Timestamp("2026-11-07 15:13")) <= pd.Timedelta(minutes=3)
     assert sun.times(78.2, 15.6, date(2026, 12, 21), date(2026, 12, 21)).empty   # polar night
+
+
+def test_hover_table_has_every_series_per_hour():
+    obs = charts._melt(pd.DataFrame({"date": pd.to_datetime(["2026-11-09 04:00", "2026-11-09 05:00"]),
+                                     "tm": [-3.0, -3.1], "td": [-3.5, None]}))
+    fc_t = pd.DataFrame({"date": pd.to_datetime(["2026-11-09 05:00", "2026-11-09 06:00"]),
+                         "value": [-2.0, 2.7], "run": ["sprzed 24 h", "najnowsza"]})
+    h = charts.hover_table(obs, fc_t).set_index("date")
+    assert h.loc["2026-11-09 05:00", "temperatura"] == "-3.1 °C" and h.loc["2026-11-09 05:00", "punkt rosy"] == "—"
+    assert h.loc["2026-11-09 05:00", "prognoza T"] == "-2.0 °C" and "prognoza" not in h
+    assert h.loc["2026-11-09 06:00", "temperatura"] == "—" and "prognoza Td" not in h
+    assert list(h.columns)[:3] == ["temperatura", "prognoza T", "punkt rosy"]
+
+
+def test_to_local_follows_cet_and_cest():
+    df = pd.DataFrame({"date": pd.to_datetime(["2026-11-09 05:00", "2026-07-01 05:00"])})
+    assert charts.to_local(df)["date"].tolist() == [pd.Timestamp("2026-11-09 06:00"), pd.Timestamp("2026-07-01 07:00")]
+    assert df["date"].iloc[0] == pd.Timestamp("2026-11-09 05:00")      # input left as is
+    assert charts.to_local(None) is None

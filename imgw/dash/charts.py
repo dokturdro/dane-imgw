@@ -9,16 +9,29 @@ import pandas as pd
 
 from imgw.dash import style
 
+LOCAL_TZ = "Europe/Warsaw"
+
+
+def to_local(df: pd.DataFrame | None, cols=("date",)) -> pd.DataFrame | None:
+    """Copy with naive-UTC ``cols`` turned into naive Polish local time (CET/CEST), for the charts."""
+    if df is None or df.empty:
+        return df
+    out = df.copy()
+    for c in cols:
+        out[c] = (pd.to_datetime(out[c]).dt.tz_localize("UTC").dt.tz_convert(LOCAL_TZ).dt.tz_localize(None))
+    return out
+
+
 MONTH_ABBR = ["sty", "lut", "mar", "kwi", "maj", "cze", "lip", "sie", "wrz", "paź", "lis", "gru"]
 RAIN_STOPS_MM = [0, 2.5, 10, 22.5, 40]  # daily totals pinned to each THEMES "rain" colour
 
 THEMES = {
-    "light": dict(s1="#2a78d6", s2="#eb6834", s3="#86b6ef", night="rgba(82, 81, 78, 0.13)", fc_label="#b8b7b0", ink="#0b0b0b", ink2="#52514e", muted="#898781",
+    "light": dict(s1="#2a78d6", s2="#eb6834", s3="#86b6ef", night="rgba(82, 81, 78, 0.13)", fc_label="#b8b7b0", now_rule="#adaca5", ink="#0b0b0b", ink2="#52514e", muted="#898781",
                   grid="#e1e0d9", axis="#c3c2b7", band="#e1e0d9", context="#c3c2b7",
                   div=["#184f95", "#f0efec", "#e34948"],
                   frost="rgba(158, 197, 244, 0.35)",
                   rain=["#9ec5f4", "#5598e7", "#2a78d6", "#1c5cab", "#0d366b"]),
-    "dark": dict(s1="#3987e5", s2="#d95926", s3="#9ec5f4", night="rgba(195, 194, 183, 0.10)", fc_label="#62615d", ink="#f0efec", ink2="#c3c2b7", muted="#898781",
+    "dark": dict(s1="#3987e5", s2="#d95926", s3="#9ec5f4", night="rgba(195, 194, 183, 0.10)", fc_label="#62615d", now_rule="#6b6a65", ink="#f0efec", ink2="#c3c2b7", muted="#898781",
                  grid="#2c2c2a", axis="#383835", band="#383835", context="#52514e",
                  div=["#3987e5", "#383835", "#e66767"],
                  frost="rgba(57, 135, 229, 0.18)",
@@ -122,7 +135,10 @@ def _midnights(*frames: pd.DataFrame, include_start: bool = False) -> pd.DataFra
     """Every 00:00 inside the frames' time span (the span's first instant only with ``include_start``)."""
     dates = pd.concat([pd.to_datetime(f["date"]) for f in frames if f is not None and not f.empty])
     days = pd.date_range(dates.min().ceil("D"), dates.max(), freq="D")
-    return pd.DataFrame({"date": days if include_start else days[days > dates.min()]})
+    if not include_start:
+        return pd.DataFrame({"date": days[days > dates.min()]})
+    # label the first day at the left edge even when the data starts after its midnight
+    return pd.DataFrame({"date": days if dates.min() in days else days.insert(0, dates.min())})
 
 
 def _ticks(freq: str, *frames: pd.DataFrame) -> list[alt.DateTime]:
@@ -131,8 +147,11 @@ def _ticks(freq: str, *frames: pd.DataFrame) -> list[alt.DateTime]:
     dates = pd.concat([pd.to_datetime(f["date"]) for f in frames if f is not None and not f.empty])
     if dates.empty:
         return []
+    ticks = pd.date_range(dates.min().ceil(freq), dates.max(), freq=freq)
+    if freq == "D" and dates.min() not in ticks:     # name the first (partial) day at the left edge
+        ticks = ticks.insert(0, dates.min())
     return [alt.DateTime(year=ts.year, month=ts.month, date=ts.day, hours=ts.hour)
-            for ts in pd.date_range(dates.min().ceil(freq), dates.max(), freq=freq)]
+            for ts in ticks]
 
 
 def hourly_temperature(df: pd.DataFrame, theme: str, forecast: pd.DataFrame | None = None,
@@ -157,7 +176,7 @@ def hourly_temperature(df: pd.DataFrame, theme: str, forecast: pd.DataFrame | No
         fill=alt.Fill("value:Q", legend=None,
                       scale=alt.Scale(type="threshold", domain=style.T2M_DOMAIN, range=style.T2M_RANGE)),
         stroke=alt.Stroke("series:N", title=None, scale=series),
-        tooltip=[alt.Tooltip("date:T", title="czas UTC", format="%Y-%m-%d %H:%M"),
+        tooltip=[alt.Tooltip("date:T", title="czas", format="%Y-%m-%d %H:%M"),
                  alt.Tooltip("series:N", title="seria"), alt.Tooltip("value:Q", format=".1f", title="°C")])
     # temperature labels above its dots, dew point below, so the two series don't collide
     text = [base.mark_text(dy=dy, fontSize=9, color=t["ink2"]).encode(text=alt.Text("value:Q", format=".1f"))
@@ -188,7 +207,7 @@ def hourly_temperature(df: pd.DataFrame, theme: str, forecast: pd.DataFrame | No
                       .encode(x=x, y="value:Q", color=color))
         layers.append(alt.Chart(dew.iloc[1:]).mark_point(size=40, filled=True, opacity=0.7).encode(
             x=x, y="value:Q", color=color,
-            tooltip=[alt.Tooltip("date:T", title="prognoza, czas UTC", format="%Y-%m-%d %H:%M"),
+            tooltip=[alt.Tooltip("date:T", title="prognoza, czas", format="%Y-%m-%d %H:%M"),
                      alt.Tooltip("value:Q", format=".1f", title="punkt rosy °C")]))
     if fc_parts:
         f = pd.concat(fc_parts, ignore_index=True).rename(columns={"tm": "value"}).assign(series=FC_T)
@@ -196,16 +215,53 @@ def hourly_temperature(df: pd.DataFrame, theme: str, forecast: pd.DataFrame | No
         fenc = dict(x=x, y="value:Q", color=color)
         layers.append(alt.Chart(f).mark_line(strokeWidth=2, strokeDash=[5, 3]).encode(**fenc))
         layers.append(alt.Chart(f).mark_point(size=40, filled=True, opacity=0.8).encode(
-            **fenc, tooltip=[alt.Tooltip("date:T", title="czas UTC", format="%Y-%m-%d %H:%M"),
+            **fenc, tooltip=[alt.Tooltip("date:T", title="czas", format="%Y-%m-%d %H:%M"),
                              alt.Tooltip("run:N", title="prognoza"),
                              alt.Tooltip("value:Q", format=".1f", title="T °C")]))
         layers.append(alt.Chart(f).mark_text(dy=-10, fontSize=9, color=t["fc_label"]).encode(
             x=x, y="value:Q", text=alt.Text("value:Q", format=".1f")))
+    if have_ahead:   # where the readings end and the latest forecast takes over
+        layers.append(alt.Chart(pd.DataFrame({"date": [last_obs]})).mark_rule(
+            color=t["now_rule"], strokeWidth=1.5, strokeDash=[2, 2]).encode(x=x))
+    layers += _hover_columns(t, axis, d, f if fc_parts else None)
     return _cfg(alt.layer(*layers), t, 260)
 
 
+HOVER_FIELDS = [("temperatura", "temperatura"), ("prognoza T", "prognoza"), ("punkt rosy", "punkt rosy")]
+
+
+def hover_table(obs: pd.DataFrame, fc_t: pd.DataFrame | None) -> pd.DataFrame:
+    """One row per hour with every value shown on the plot, pre-formatted ("—" when absent)."""
+    wide = obs.pivot_table(index="date", columns="series", values="value")
+    if fc_t is not None and not fc_t.empty:
+        wide = wide.join(fc_t.set_index("date")["value"].rename("prognoza T"), how="outer")
+    out = pd.DataFrame({"date": wide.index})
+    for col, _ in HOVER_FIELDS:
+        v = wide[col] if col in wide else pd.Series(float("nan"), index=wide.index)
+        out[col] = [("—" if pd.isna(x) else f"{x:.1f} °C") for x in v]
+    return out
+
+
+def _hover_columns(t: dict, axis: alt.Axis, obs, fc_t) -> list[alt.Chart]:
+    """Invisible one-hour columns: hovering anywhere over an hour shows all its values and a guide line."""
+    h = hover_table(obs, fc_t)
+    half = pd.Timedelta(minutes=30)     # clipped to the data, so the columns don't widen the x axis
+    h["start"] = (h["date"] - half).clip(lower=h["date"].min())
+    h["end"] = (h["date"] + half).clip(upper=h["date"].max())
+    hover = alt.selection_point(fields=["date"], on="pointerover", clear="pointerout", empty=False)
+    tip = [alt.Tooltip("date:T", title="czas", format="%d.%m %H:%M"),
+           *[alt.Tooltip(f"{col}:N", title=title) for col, title in HOVER_FIELDS]]
+    guide = alt.Chart(h).mark_rule(color=t["muted"], strokeWidth=1).encode(
+        x=alt.X("date:T", axis=axis, title=None),
+        opacity=alt.condition(hover, alt.value(0.7), alt.value(0)))
+    # a rect with only x/x2 fills the plot's height; Vega doesn't hover marks at opacity 0, so 0.001
+    cols = alt.Chart(h).mark_rect(opacity=0.001).encode(
+        x=alt.X("start:T", axis=axis, title=None), x2="end:T", tooltip=tip).add_params(hover)
+    return [guide, cols]
+
+
 def daily_extremes(tm: pd.DataFrame) -> pd.DataFrame:
-    """Highest temperature of each day (06–18 UTC) and lowest of each night (18–06 UTC).
+    """Highest temperature of each day (06–18) and lowest of each night (18–06), in the data's time.
 
     Day and night windows, not calendar days, so a cold spell crossing midnight gives one
     minimum instead of two neighbouring ones. Column ``kind``: "Tmax dzień" / "Tmin noc".
@@ -255,13 +311,13 @@ def forecast_chart(df: pd.DataFrame, theme: str, sun: pd.DataFrame | None = None
     pts = base.mark_point(size=60, filled=True).encode(
         color=alt.Color("series:N", title=None, scale=series),
         opacity=alt.condition(hover, alt.value(1), alt.value(0)),
-        tooltip=[alt.Tooltip("date:T", title="czas UTC", format="%Y-%m-%d %H:%M"),
+        tooltip=[alt.Tooltip("date:T", title="czas", format="%Y-%m-%d %H:%M"),
                  alt.Tooltip("series:N", title="seria"), alt.Tooltip("value:Q", format=".1f", title="°C")]
     ).add_params(hover)
     rule = base.mark_rule(color=t["muted"]).encode(
         opacity=alt.condition(hover, alt.value(0.6), alt.value(0))).transform_filter(hover)
     ext = daily_extremes(d[d["series"] == "temperatura"])
-    etip = [alt.Tooltip("date:T", title="czas UTC", format="%Y-%m-%d %H:%M"),
+    etip = [alt.Tooltip("date:T", title="czas", format="%Y-%m-%d %H:%M"),
             alt.Tooltip("kind:N", title=""), alt.Tooltip("value:Q", format=".1f", title="°C")]
     edots = alt.Chart(ext).mark_point(size=45, filled=True, opacity=1, color=t["s1"]).encode(
         x=x, y="value:Q", tooltip=etip)
@@ -276,7 +332,7 @@ def forecast_chart(df: pd.DataFrame, theme: str, sun: pd.DataFrame | None = None
     bars = alt.Chart(p[p["prcp"] > 0]).mark_bar(color=t["s1"]).encode(
         x=alt.X("start:T", title=None, axis=axis), x2="date:T",
         y=alt.Y("prcp:Q", title="opad [mm/h]"), y2=alt.datum(0),
-        tooltip=[alt.Tooltip("date:T", title="godzina do (UTC)", format="%Y-%m-%d %H:%M"),
+        tooltip=[alt.Tooltip("date:T", title="godzina do", format="%Y-%m-%d %H:%M"),
                  alt.Tooltip("prcp:Q", title="opad [mm]", format=".1f")]
     ).properties(height=90, width="container")
     if shade:

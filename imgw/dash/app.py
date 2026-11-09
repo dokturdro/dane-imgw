@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import html
 import os
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 import httpx
@@ -282,6 +283,8 @@ with tab_now:
     sun_t = (None if pd.isna(meta["lat"]) or pd.isna(meta["lon"]) else
              sun.times(float(meta["lat"]), float(meta["lon"]), min(day, TODAY) - timedelta(days=2),
                        TODAY + timedelta(days=17)))
+    fc_l = charts.to_local(fc)
+    sun_l = charts.to_local(sun_t, ("sunrise", "sunset"))
     if h.empty:
         st.caption("Brak danych godzinowych (tylko stacje synoptyczne).")
     else:
@@ -296,25 +299,27 @@ with tab_now:
                                     "◦": st.column_config.Column(" ", width="small"),
                                     "pogoda": st.column_config.Column("pogoda bieżąca", width="large"),
                                     **column_config(HOURLY_COLS, labels.HOURLY_VARS)})
+        # the plots run in Polish local time; the table above stays in UTC like the archive
+        hl = charts.to_local(h)
         ahead = None
-        past = load_forecast(meta, _day_ahead, day - timedelta(days=1), day)
-        if fc is not None and not fc.empty and day == hour_end:
-            obs = h.dropna(subset=["tm"])["date"]
+        past = charts.to_local(load_forecast(meta, _day_ahead, day - timedelta(days=1), day))
+        if fc_l is not None and not fc_l.empty and day == hour_end:
+            obs = hl.dropna(subset=["tm"])["date"]
             if not obs.empty:
-                ahead = forecast.next_days(fc, pd.Timestamp(obs.max()).to_pydatetime(),
-                                            datetime.now(timezone.utc).replace(tzinfo=None))
+                ahead = forecast.next_days(fc_l, pd.Timestamp(obs.max()).to_pydatetime(),
+                                           datetime.now(ZoneInfo(charts.LOCAL_TZ)).replace(tzinfo=None))
         if (ahead is not None and not ahead.empty) or (past is not None and not past.empty):
             st.caption("Prognoza T (Open-Meteo): nad pomiarami — prognoza wydana 24 h wcześniej, "
-                       "dalej — najnowsza do końca jutra i pojutrza · przerywane pionowe linie: północ UTC · "
+                       "dalej — najnowsza do końca jutra i pojutrza · przerywane pionowe linie: północ · czas polski · "
                        "szare tło: noc")
-        st.altair_chart(charts.hourly_temperature(h, TH, ahead, past, sun_t), width="stretch", theme=None)
+        st.altair_chart(charts.hourly_temperature(hl, TH, ahead, past, sun_l), width="stretch", theme=None)
     if fc is not None:
         if fc.empty:
             st.caption("Prognoza niedostępna.")
         else:
-            st.caption(f"Prognoza godzinowa do {fc['date'].max():%d.%m %H:%M} UTC · temperatura, punkt rosy "
+            st.caption(f"Prognoza godzinowa do {fc_l['date'].max():%d.%m %H:%M} (czas polski) · temperatura, punkt rosy "
                        "i opad godzinowy · szare tło: noc (zachód–wschód słońca) · dane Open-Meteo.com (CC BY 4.0), punkt siatki modelu przy stacji")
-            st.altair_chart(charts.forecast_chart(fc, TH, sun_t), width="stretch", theme=None)
+            st.altair_chart(charts.forecast_chart(fc_l, TH, sun_l), width="stretch", theme=None)
 
     # --- daily ---
     st.divider()
