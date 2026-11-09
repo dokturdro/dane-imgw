@@ -126,3 +126,9 @@ def test_to_local_follows_cet_and_cest():
     assert charts.to_local(df)["date"].tolist() == [pd.Timestamp("2026-11-09 06:00"), pd.Timestamp("2026-07-01 07:00")]
     assert df["date"].iloc[0] == pd.Timestamp("2026-11-09 05:00")      # input left as is
     assert charts.to_local(None) is None
+
+
+def test_utc_offset_label():
+    assert charts.utc_offset_label(pd.Series(pd.to_datetime(["2026-11-09 05:00"]))) == "UTC+1"
+    assert charts.utc_offset_label(pd.Series(pd.to_datetime(["2026-07-01 05:00"]))) == "UTC+2"
+    assert charts.utc_offset_label(pd.Series(pd.to_datetime(["2026-10-24 12:00", "2026-10-25 12:00"]))) == "UTC+1/+2"

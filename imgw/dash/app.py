@@ -288,14 +288,16 @@ with tab_now:
     if h.empty:
         st.caption("Brak danych godzinowych (tylko stacje synoptyczne).")
     else:
-        hv = h[["date", *[c for c in HOURLY_COLS if c in h]]].copy()
+        hv = charts.to_local(h)[["date", *[c for c in HOURLY_COLS if c in h]]].copy()
+        tz_label = charts.utc_offset_label(h["date"])
         if h["provisional"].any():
             hv.insert(1, "◦", h["provisional"].map({True: "wstępne", False: ""}))
         hv["pogoda"] = hv["ww"].map(lambda v: labels.WW_NAMES.get(int(v), "") if pd.notna(v) else "")
         hv = hv.sort_values("date", ascending=False)
         st.dataframe(style.style_frame(hv, style.HOURLY_SCALES, whole=style.HOURLY_WHOLE), hide_index=True,
                      width="stretch", placeholder="", height=420,
-                     column_config={"date": st.column_config.DatetimeColumn("czas UTC", format="DD.MM HH:mm"),
+                     column_config={"date": st.column_config.DatetimeColumn(f"czas ({tz_label})", format="DD.MM HH:mm",
+                                                                           help="czas polski"),
                                     "◦": st.column_config.Column(" ", width="small"),
                                     "pogoda": st.column_config.Column("pogoda bieżąca", width="large"),
                                     **column_config(HOURLY_COLS, labels.HOURLY_VARS)})

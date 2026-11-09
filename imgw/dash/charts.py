@@ -22,6 +22,13 @@ def to_local(df: pd.DataFrame | None, cols=("date",)) -> pd.DataFrame | None:
     return out
 
 
+def utc_offset_label(dates: pd.Series) -> str:
+    """"UTC+1", "UTC+2", or "UTC+1/+2" when the span crosses a clock change, for naive-UTC ``dates``."""
+    hours = sorted({int(o.total_seconds() // 3600) for o in
+                    pd.to_datetime(dates).dt.tz_localize("UTC").dt.tz_convert(LOCAL_TZ).map(lambda t: t.utcoffset())})
+    return "UTC" + "/".join(f"+{h}" for h in hours) if hours else "UTC"
+
+
 MONTH_ABBR = ["sty", "lut", "mar", "kwi", "maj", "cze", "lip", "sie", "wrz", "paź", "lis", "gru"]
 RAIN_STOPS_MM = [0, 2.5, 10, 22.5, 40]  # daily totals pinned to each THEMES "rain" colour
 
