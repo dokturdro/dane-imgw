@@ -1,4 +1,4 @@
-# daneimgw — local IMGW data mirror
+#/ daneimgw — local IMGW data mirror
 
 A local, self-refreshing replacement for the data behind
 [dane.meteomodel.pl](https://dane.meteomodel.pl). It mirrors IMGW's public archive into DuckDB,

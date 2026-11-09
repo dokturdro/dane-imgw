@@ -1,6 +1,7 @@
 # One-file launcher for the dashboard, opened from the browser bookmark  imgw://dash
 #   powershell -File scripts\open_dash.ps1 -Register   once: make imgw:// links run this script
-#   powershell -File scripts\open_dash.ps1             start `imgw dash` hidden (if needed), open the browser,
+#   powershell -File scripts\open_dash.ps1             start `imgw dash` hidden (if needed, or restart it when
+#                                                      the code changed), open the browser,
 #                                                      then refresh the data: synop -> live -> sync
 #   powershell -File scripts\open_dash.ps1 -Stop       stop the background dashboard
 # Unregister with:  Remove-Item -Recurse HKCU:\Software\Classes\imgw
@@ -38,6 +39,22 @@ if ($Stop) {
 
 New-Item -ItemType Directory -Force $logDir | Out-Null
 $uv = (Get-Command uv).Source
+
+# Streamlit reruns app.py but keeps already-imported modules, so a server started before the code
+# changed fails on new imports: restart it when any project file is newer than the server.
+$l = Get-Listener
+if ($l) {
+    $started = (Get-Process -Id $l.OwningProcess).StartTime
+    $newest = @(Get-ChildItem -Recurse -Filter *.py (Join-Path $project 'imgw')) +
+        @(Get-Item (Join-Path $project 'pyproject.toml'), (Join-Path $project 'uv.lock'),
+              (Join-Path $project '.streamlit\config.toml') -ErrorAction SilentlyContinue) |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($newest.LastWriteTime -gt $started) {
+        Stop-Process -Id $l.OwningProcess -Force
+        $deadline = (Get-Date).AddSeconds(15)
+        while ((Get-Listener) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 300 }
+    }
+}
 
 if (-not (Get-Listener)) {
     Start-Process -FilePath $uv -WindowStyle Hidden -WorkingDirectory $project `

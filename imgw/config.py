@@ -10,6 +10,8 @@ ROOT = Path(__file__).resolve().parent.parent
 BASE_URL = "https://danepubliczne.imgw.pl/data/dane_pomiarowo_obserwacyjne/dane_meteorologiczne"
 LIVE_SYNOP_URL = "https://danepubliczne.imgw.pl/api/data/synop"
 LIVE_METEO_URL = "https://danepubliczne.imgw.pl/api/data/meteo"
+OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
+OPEN_METEO_PREVIOUS_URL = "https://previous-runs-api.open-meteo.com/v1/forecast"   # earlier model runs
 
 
 @dataclass

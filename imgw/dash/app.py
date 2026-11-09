@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import html
 import os
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
+import httpx
 import pandas as pd
 import streamlit as st
 
-from imgw import config, db, download, live, synop_feed
+from imgw import config, db, download, forecast, live, sun, synop_feed
 from imgw.dash import charts, labels, queries as q, style
 
 st.set_page_config(page_title="Dane IMGW", page_icon="🌦️", layout="wide")
@@ -54,6 +55,29 @@ def load(name: str, *args):
             return val
         st.warning("Baza jest zajęta (trwa synchronizacja). Spróbuj za chwilę.")
         st.stop()
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _forecast(lat: float, lon: float, elevation: float | None) -> pd.DataFrame:
+    with download.client() as c:
+        return forecast.fetch(c, lat, lon, elevation)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _day_ahead(lat: float, lon: float, elevation: float | None, start: date, end: date) -> pd.DataFrame:
+    with download.client() as c:
+        return forecast.day_ahead(c, lat, lon, elevation, start, end)
+
+
+def load_forecast(meta, fn=_forecast, *args) -> pd.DataFrame | None:
+    """Open-Meteo data for the station: None without coordinates, empty when the request fails."""
+    if pd.isna(meta["lat"]) or pd.isna(meta["lon"]):
+        return None
+    try:   # raised outside the cached call, so a failure is retried on the next run
+        return fn(float(meta["lat"]), float(meta["lon"]),
+                  None if pd.isna(meta["elevation"]) else float(meta["elevation"]), *args)
+    except (httpx.HTTPError, KeyError, ValueError):
+        return pd.DataFrame()
 
 
 def refresh_sources() -> str:
@@ -253,6 +277,11 @@ with tab_now:
     hour_end = max(stamps).date() if stamps else TODAY
     day = hcol.date_input("Dane godzinowe — dzień", hour_end, max_value=hour_end, format="YYYY-MM-DD")
     h = load("hourly", sid, day - timedelta(days=1), day)
+    fc = load_forecast(meta)
+    # sunrise / sunset for the night shading: yesterday through the end of the 16-day forecast
+    sun_t = (None if pd.isna(meta["lat"]) or pd.isna(meta["lon"]) else
+             sun.times(float(meta["lat"]), float(meta["lon"]), min(day, TODAY) - timedelta(days=2),
+                       TODAY + timedelta(days=17)))
     if h.empty:
         st.caption("Brak danych godzinowych (tylko stacje synoptyczne).")
     else:
@@ -267,7 +296,25 @@ with tab_now:
                                     "◦": st.column_config.Column(" ", width="small"),
                                     "pogoda": st.column_config.Column("pogoda bieżąca", width="large"),
                                     **column_config(HOURLY_COLS, labels.HOURLY_VARS)})
-        st.altair_chart(charts.hourly_temperature(h, TH), width="stretch", theme=None)
+        ahead = None
+        past = load_forecast(meta, _day_ahead, day - timedelta(days=1), day)
+        if fc is not None and not fc.empty and day == hour_end:
+            obs = h.dropna(subset=["tm"])["date"]
+            if not obs.empty:
+                ahead = forecast.next_days(fc, pd.Timestamp(obs.max()).to_pydatetime(),
+                                            datetime.now(timezone.utc).replace(tzinfo=None))
+        if (ahead is not None and not ahead.empty) or (past is not None and not past.empty):
+            st.caption("Prognoza T (Open-Meteo): nad pomiarami — prognoza wydana 24 h wcześniej, "
+                       "dalej — najnowsza do końca jutra i pojutrza · przerywane pionowe linie: północ UTC · "
+                       "szare tło: noc")
+        st.altair_chart(charts.hourly_temperature(h, TH, ahead, past, sun_t), width="stretch", theme=None)
+    if fc is not None:
+        if fc.empty:
+            st.caption("Prognoza niedostępna.")
+        else:
+            st.caption(f"Prognoza godzinowa do {fc['date'].max():%d.%m %H:%M} UTC · temperatura, punkt rosy "
+                       "i opad godzinowy · szare tło: noc (zachód–wschód słońca) · dane Open-Meteo.com (CC BY 4.0), punkt siatki modelu przy stacji")
+            st.altair_chart(charts.forecast_chart(fc, TH, sun_t), width="stretch", theme=None)
 
     # --- daily ---
     st.divider()
