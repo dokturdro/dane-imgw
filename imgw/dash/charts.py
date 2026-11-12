@@ -1,4 +1,4 @@
-"""Altair charts. One y-axis per chart, 2px lines, recessive grid, tooltips on
+"""Altair charts. One y-axis per chart (except the forecast's precipitation + wind panel), 2px lines, recessive grid, tooltips on
 every mark. Series colours are the dataviz reference palette's slots 1-2
 (validated light & dark with validate_palette.js); text stays in theme ink."""
 
@@ -304,8 +304,8 @@ def _night_layer(palette: dict, sun: pd.DataFrame | None, axis: alt.Axis, *frame
 
 
 def forecast_chart(df: pd.DataFrame, theme: str, sun: pd.DataFrame | None = None) -> alt.Chart:
-    """Whole hourly forecast: temperature and dew point above hourly precipitation bars;
-    ``sun`` greys out the nights."""
+    """Whole hourly forecast: temperature and dew point above one panel of hourly precipitation
+    (left axis) and wind speed and gusts (right axis) over the cloud cover; ``sun`` greys out the nights."""
     palette = THEMES[theme]
     d = _melt(df)
     series = alt.Scale(domain=list(SERIES.values()), range=[palette["s1"], palette["s2"]])
@@ -333,19 +333,32 @@ def forecast_chart(df: pd.DataFrame, theme: str, sun: pd.DataFrame | None = None
     shade = _night_layer(palette, sun, axis, d)
     top = alt.layer(*shade, _frost(palette, "fc_temp_y", "fc_temp_height"), lines, edots, *elabels, rule, pts).properties(name="fc_temp", height=220, width="container")
 
-    p = df[["date", "prcp"]].copy()
-    p["date"] = pd.to_datetime(p["date"])
-    p["start"] = p["date"] - pd.Timedelta(hours=1)    # Open-Meteo sums the preceding hour
-    bars = alt.Chart(p[p["prcp"] > 0]).mark_bar(color=palette["s1"]).encode(
+    h = df[["date", "prcp", "cloud_cover", "wind_speed", "wind_gust"]].copy()
+    h["date"] = pd.to_datetime(h["date"])
+    h["start"] = h["date"] - pd.Timedelta(hours=1)    # Open-Meteo sums the preceding hour
+    # the precipitation bars and the hourly wind points each carry the whole hour
+    tip = [alt.Tooltip("date:T", title="czas", format="%Y-%m-%d %H:%M"),
+           alt.Tooltip("prcp:Q", title="opad w godzinie do [mm]", format=".1f"),
+           alt.Tooltip("cloud_cover:Q", title="zachmurzenie [%]", format=".0f"),
+           alt.Tooltip("wind_speed:Q", title="prędkość wiatru [m/s]", format=".1f"),
+           alt.Tooltip("wind_gust:Q", title="porywy [m/s]", format=".1f")]
+    # cloud cover is instantaneous, so each hour's step is centred on the hour itself
+    clouds = alt.Chart(h).mark_area(color=palette["muted"], opacity=0.3, interpolate="step").encode(
+        x=x, y=alt.Y("cloud_cover:Q", axis=None, scale=alt.Scale(domain=[0, 100])))
+    bars = alt.Chart(h[h["prcp"] > 0]).mark_bar(color=palette["s1"]).encode(
         x=alt.X("start:T", title=None, axis=axis), x2="date:T",
-        y=alt.Y("prcp:Q", title="opad [mm/h]"), y2=alt.datum(0),
-        tooltip=[alt.Tooltip("date:T", title="godzina do", format="%Y-%m-%d %H:%M"),
-                 alt.Tooltip("prcp:Q", title="opad [mm]", format=".1f")]
-    ).properties(height=90, width="container")
-    if shade:
-        bars = alt.layer(*shade, bars).properties(height=90, width="container")
-    # two charts, two axes — never a dual axis
-    return _style(alt.vconcat(top, bars).resolve_scale(x="shared"), palette)
+        y=alt.Y("prcp:Q", title="opad [mm/h]"), y2=alt.datum(0), tooltip=tip)
+    # invisible points give every hour of both lines its own tooltip
+    wind_base = alt.Chart(h).encode(x=x, tooltip=tip)
+    hour_points = alt.OverlayMarkDef(size=40, opacity=0)
+    wind = alt.layer(
+        wind_base.mark_line(strokeWidth=1.5, strokeDash=[4, 3], color=palette["ink2"], point=hour_points).encode(
+            y=alt.Y("wind_gust:Q", title="wiatr [m/s]", axis=alt.Axis(orient="right", grid=False))),
+        wind_base.mark_line(strokeWidth=2, color=palette["ink2"], point=hour_points).encode(y="wind_speed:Q"))
+    # cloud cover fills the panel behind; precipitation and wind each get their own side's axis
+    weather = (alt.layer(*shade, clouds, bars, wind).resolve_scale(y="independent")
+               .properties(height=150, width="container"))
+    return _style(alt.vconcat(top, weather).resolve_scale(x="shared"), palette)
 
 
 def climograph(year_vals: pd.DataFrame, normals: pd.DataFrame, theme: str, unit: str,

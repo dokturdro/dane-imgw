@@ -316,8 +316,8 @@ with tab_now:
         if forecast_utc.empty:
             st.caption("Prognoza niedostępna.")
         else:
-            st.caption(f"Prognoza godzinowa do {forecast_local['date'].max():%d.%m %H:%M} (czas polski) · temperatura, punkt rosy "
-                       "i opad godzinowy · szare tło: noc (zachód–wschód słońca) · dane Open-Meteo.com (CC BY 4.0), punkt siatki modelu przy stacji")
+            st.caption(f"Prognoza godzinowa do {forecast_local['date'].max():%d.%m %H:%M} (czas polski) · temperatura, punkt rosy, "
+                       "pod spodem opad godzinowy (oś lewa), wiatr (oś prawa; ciągła linia: prędkość, przerywana: porywy) i zachmurzenie (szare słupki, 0–100 %) · szare tło: noc (zachód–wschód słońca) · dane Open-Meteo.com (CC BY 4.0), punkt siatki modelu przy stacji")
             st.altair_chart(charts.forecast_chart(forecast_local, THEME, sun_local), width="stretch", theme=None)
 
     # --- daily ---

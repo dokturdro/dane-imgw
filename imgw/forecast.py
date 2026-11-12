@@ -9,12 +9,15 @@ import pandas as pd
 
 from .config import OPEN_METEO_PREVIOUS_URL, OPEN_METEO_URL
 
-HOURLY = {"temperature_2m": "tm", "dew_point_2m": "td", "precipitation": "prcp"}
+HOURLY = {"temperature_2m": "tm", "dew_point_2m": "td", "precipitation": "prcp",
+          "cloud_cover": "cloud_cover", "wind_speed_10m": "wind_speed", "wind_gusts_10m": "wind_gust"}
 
 
 def fetch(client: httpx.Client, lat: float, lon: float, elevation: float | None = None) -> pd.DataFrame:
-    """Hourly forecast for the point, columns ``date`` (naive UTC), ``tm``, ``td``, ``prcp``."""
-    params = {**_point(lat, lon, elevation), "hourly": ",".join(HOURLY), "forecast_days": 16}
+    """Hourly forecast for the point, columns ``date`` (naive UTC), ``tm``, ``td``, ``prcp``,
+    ``cloud_cover`` [%], ``wind_speed`` and ``wind_gust`` [m/s, as in the IMGW tables]."""
+    params = {**_point(lat, lon, elevation), "hourly": ",".join(HOURLY), "forecast_days": 16,
+              "wind_speed_unit": "ms"}
     h = client.get(OPEN_METEO_URL, params=params).raise_for_status().json()["hourly"]
     df = pd.DataFrame({"date": pd.to_datetime(h["time"]),
                        **{col: pd.to_numeric(pd.Series(h[k]), errors="coerce") for k, col in HOURLY.items()}})

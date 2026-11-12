@@ -13,7 +13,8 @@ def _payload(n=6, nulls=2):
     times = [f"2026-11-07T{h:02d}:00" for h in range(n)]
     tm = [1.0 * h - 2 for h in range(n - nulls)] + [None] * nulls
     return {"hourly": {"time": times, "temperature_2m": tm, "dew_point_2m": [x and x - 1 for x in tm],
-                       "precipitation": [0.0, 0.3] + [0.0] * (n - 2)}}
+                       "precipitation": [0.0, 0.3] + [0.0] * (n - 2),
+                       "cloud_cover": [100] * n, "wind_speed_10m": [3.2] * n, "wind_gusts_10m": [7.5] * n}}
 
 
 def _client(seen):
@@ -27,10 +28,11 @@ def test_fetch_drops_trailing_nulls_and_keeps_naive_utc():
     seen = []
     with _client(seen) as c:
         df = forecast.fetch(c, 50.6, 17.9, 176.0)
-    assert list(df.columns) == ["date", "tm", "td", "prcp"]
+    assert list(df.columns) == ["date", "tm", "td", "prcp", "cloud_cover", "wind_speed", "wind_gust"]
     assert len(df) == 4 and df["date"].dt.tz is None
     assert df["date"].iloc[0] == pd.Timestamp("2026-11-07 00:00")
     assert seen[0]["timezone"] == "GMT" and seen[0]["elevation"] == "176.0"
+    assert seen[0]["wind_speed_unit"] == "ms"
 
 
 def test_fetch_skips_unknown_elevation():
@@ -49,7 +51,7 @@ def test_next_days_window():
 
 def test_charts_build():
     fc = pd.DataFrame({"date": pd.date_range("2026-11-07", periods=30, freq="h"),
-                       "tm": 1.0, "td": -1.0, "prcp": 0.2})
+                       "tm": 1.0, "td": -1.0, "prcp": 0.2, "cloud_cover": 75.0, "wind_speed": 4.0, "wind_gust": 9.0})
     obs = fc.iloc[:6]
     for th in ("light", "dark"):
         assert charts.hourly_temperature(obs, th).to_dict()
