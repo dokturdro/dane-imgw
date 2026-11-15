@@ -1,4 +1,4 @@
-"""Altair charts. One y-axis per chart (except the forecast's precipitation + wind panel), 2px lines, recessive grid, tooltips on
+"""Altair charts. One y-axis per chart (except where wind gets its own right-hand axis), 2px lines, recessive grid, tooltips on
 every mark. Series colours are the dataviz reference palette's slots 1-2
 (validated light & dark with validate_palette.js); text stays in theme ink."""
 
@@ -163,10 +163,11 @@ def _ticks(freq: str, *frames: pd.DataFrame) -> list[alt.DateTime]:
 
 def hourly_temperature(df: pd.DataFrame, theme: str, forecast: pd.DataFrame | None = None,
                        past: pd.DataFrame | None = None, sun: pd.DataFrame | None = None) -> alt.Chart:
-    """Observed temperature and dew point, plus the temperature forecast as its own line.
+    """Observed temperature and dew point, plus the temperature forecast as its own line;
+    wind speed on a right-hand axis.
 
     ``past``: the forecast issued 24 h earlier for the observed hours (prediction vs result);
-    ``forecast``: the latest forecast after the last observation (temperature and dew point);
+    ``forecast``: the latest forecast after the last observation (temperature, dew point, wind);
     ``sun``: sunrise / sunset times, nights greyed out.
     """
     palette = THEMES[theme]
@@ -188,7 +189,7 @@ def hourly_temperature(df: pd.DataFrame, theme: str, forecast: pd.DataFrame | No
     # temperature labels above its dots, dew point below, so the two series don't collide
     text = [base.mark_text(dy=dy, fontSize=9, color=palette["ink2"]).encode(text=alt.Text("value:Q", format=".1f"))
             .transform_filter(alt.datum.series == s) for s, dy in (("temperatura", -10), ("punkt rosy", 11))]
-    layers = [*_night_layer(palette, sun, axis, d, forecast), _frost(palette)]
+    layers = [*_night_layer(palette, sun, axis, d, forecast), _frost(palette, f"{HOURLY_T}_y")]
     if not d.empty:
         layers.append(alt.Chart(_midnights(d, forecast)).mark_rule(color=palette["muted"], strokeWidth=1.5, strokeDash=[6, 4])
                       .encode(x=x))
@@ -196,8 +197,9 @@ def hourly_temperature(df: pd.DataFrame, theme: str, forecast: pd.DataFrame | No
             baseline="bottom", dy=-4, fontSize=11, fontWeight="bold", color=palette["ink2"]).encode(
             x=x, y=alt.value(0), text=alt.Text("date:T", format="%d.%m")))
     layers += [line, dots, *text]
+    w = _wind(df, forecast)
     if d.empty:
-        return _cfg(alt.layer(*layers), palette, 260)
+        return _with_wind(palette, layers, _wind_layer(palette, x, w))
 
     last_obs = d["date"].max()
     fc_parts = []
@@ -230,34 +232,67 @@ def hourly_temperature(df: pd.DataFrame, theme: str, forecast: pd.DataFrame | No
     if have_ahead:   # where the readings end and the latest forecast takes over
         layers.append(alt.Chart(pd.DataFrame({"date": [last_obs]})).mark_rule(
             color=palette["now_rule"], strokeWidth=1.5, strokeDash=[2, 2]).encode(x=x))
-    layers += _hover_columns(palette, axis, d, f if fc_parts else None)
-    return _cfg(alt.layer(*layers), palette, 260)
+    hover = _hover_columns(palette, axis, d, f if fc_parts else None, w)
+    return _with_wind(palette, layers, _wind_layer(palette, x, w), hover)
 
 
-HOVER_FIELDS = [("temperatura", "temperatura"), ("prognoza T", "prognoza"), ("punkt rosy", "punkt rosy")]
+HOURLY_T = "hr_temp"    # the temperature layer, whose y scale the frost shading reads
 
 
-def hover_table(obs: pd.DataFrame, fc_t: pd.DataFrame | None) -> pd.DataFrame:
+def _wind(obs: pd.DataFrame, forecast: pd.DataFrame | None) -> pd.DataFrame:
+    """Measured wind speed followed by the forecast's: ``date``, ``wind_speed``, ``forecast``."""
+    parts = [obs[["date", "wind_speed"]].assign(forecast=False)]
+    if forecast is not None and not forecast.empty:
+        parts.append(forecast[["date", "wind_speed"]].assign(forecast=True))
+    w = pd.concat(parts, ignore_index=True)
+    w["date"] = pd.to_datetime(w["date"])
+    return w.drop_duplicates("date")    # a reading wins over the forecast for the same hour
+
+
+def _wind_layer(palette: dict, x: alt.X, w: pd.DataFrame) -> alt.LayerChart:
+    """Measured wind speed solid, the forecast dashed on from the last reading; styled like the
+    forecast chart's wind speed."""
+    measured = w[~w["forecast"]]
+    ahead = pd.concat([measured.dropna(subset=["wind_speed"]).tail(1), w[w["forecast"]]], ignore_index=True)
+    y = alt.Y("wind_speed:Q", title="wiatr [m/s]", axis=alt.Axis(orient="right", grid=False))
+    line = dict(strokeWidth=2, color=palette["ink2"])
+    return alt.layer(alt.Chart(measured).mark_line(**line).encode(x=x, y=y),
+                     alt.Chart(ahead).mark_line(**line, strokeDash=[5, 3]).encode(x=x, y="wind_speed:Q"))
+
+
+def _with_wind(palette: dict, temperature: list[alt.Chart], wind: alt.LayerChart,
+               hover: list[alt.Chart] = ()) -> alt.Chart:
+    """Temperature on the left axis, wind on its own right axis; the hover columns lie over both."""
+    t = alt.layer(*temperature).properties(name=HOURLY_T)
+    return _cfg(alt.layer(t, wind, *hover).resolve_scale(y="independent"), palette, 260)
+
+
+HOVER_FIELDS = [("temperatura", "temperatura", "°C"), ("prognoza T", "prognoza", "°C"),
+                ("punkt rosy", "punkt rosy", "°C"), ("wind_speed", "wiatr", "m/s")]
+
+
+def hover_table(obs: pd.DataFrame, fc_t: pd.DataFrame | None, wind: pd.DataFrame) -> pd.DataFrame:
     """One row per hour with every value shown on the plot, pre-formatted ("—" when absent)."""
     wide = obs.pivot_table(index="date", columns="series", values="value")
     if fc_t is not None and not fc_t.empty:
         wide = wide.join(fc_t.set_index("date")["value"].rename("prognoza T"), how="outer")
+    wide = wide.join(wind.set_index("date")["wind_speed"], how="outer")
     out = pd.DataFrame({"date": wide.index})
-    for col, _ in HOVER_FIELDS:
+    for col, _, unit in HOVER_FIELDS:
         v = wide[col] if col in wide else pd.Series(float("nan"), index=wide.index)
-        out[col] = [("—" if pd.isna(x) else f"{x:.1f} °C") for x in v]
+        out[col] = [("—" if pd.isna(x) else f"{x:.1f} {unit}") for x in v]
     return out
 
 
-def _hover_columns(palette: dict, axis: alt.Axis, obs, fc_t) -> list[alt.Chart]:
+def _hover_columns(palette: dict, axis: alt.Axis, obs, fc_t, wind) -> list[alt.Chart]:
     """Invisible one-hour columns: hovering anywhere over an hour shows all its values and a guide line."""
-    h = hover_table(obs, fc_t)
+    h = hover_table(obs, fc_t, wind)
     half = pd.Timedelta(minutes=30)     # clipped to the data, so the columns don't widen the x axis
     h["start"] = (h["date"] - half).clip(lower=h["date"].min())
     h["end"] = (h["date"] + half).clip(upper=h["date"].max())
     hover = alt.selection_point(fields=["date"], on="pointerover", clear="pointerout", empty=False)
     tip = [alt.Tooltip("date:T", title="czas", format="%d.%m %H:%M"),
-           *[alt.Tooltip(f"{col}:N", title=title) for col, title in HOVER_FIELDS]]
+           *[alt.Tooltip(f"{col}:N", title=title) for col, title, _ in HOVER_FIELDS]]
     guide = alt.Chart(h).mark_rule(color=palette["muted"], strokeWidth=1).encode(
         x=alt.X("date:T", axis=axis, title=None),
         opacity=alt.condition(hover, alt.value(0.7), alt.value(0)))

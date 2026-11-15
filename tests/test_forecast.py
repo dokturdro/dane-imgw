@@ -116,8 +116,12 @@ def test_hover_table_has_every_series_per_hour():
                                      "tm": [-3.0, -3.1], "td": [-3.5, None]}))
     fc_t = pd.DataFrame({"date": pd.to_datetime(["2026-11-09 05:00", "2026-11-09 06:00"]),
                          "value": [-2.0, 2.7], "run": ["sprzed 24 h", "najnowsza"]})
-    h = charts.hover_table(obs, fc_t).set_index("date")
+    wind = pd.DataFrame({"date": pd.to_datetime(["2026-11-09 05:00", "2026-11-09 06:00"]),
+                         "wind_speed": [3.0, None]})
+    h = charts.hover_table(obs, fc_t, wind).set_index("date")
     assert h.loc["2026-11-09 05:00", "temperatura"] == "-3.1 °C" and h.loc["2026-11-09 05:00", "punkt rosy"] == "—"
+    assert h.loc["2026-11-09 05:00", "wind_speed"] == "3.0 m/s" and h.loc["2026-11-09 06:00", "wind_speed"] == "—"
+    assert h.loc["2026-11-09 04:00", "wind_speed"] == "—" and "wind_gust" not in h
     assert h.loc["2026-11-09 05:00", "prognoza T"] == "-2.0 °C" and "prognoza" not in h
     assert h.loc["2026-11-09 06:00", "temperatura"] == "—" and "prognoza Td" not in h
     assert list(h.columns)[:3] == ["temperatura", "prognoza T", "punkt rosy"]

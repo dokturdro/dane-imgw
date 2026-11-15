@@ -307,10 +307,12 @@ with tab_now:
             if not obs.empty:
                 ahead = forecast.next_days(forecast_local, pd.Timestamp(obs.max()).to_pydatetime(),
                                            datetime.now(ZoneInfo(charts.LOCAL_TZ)).replace(tzinfo=None))
+        notes = ["wiatr (szara linia, oś prawa): ciągła — pomiar, przerywana — prognoza",
+                 "przerywane pionowe linie: północ", "czas polski", "szare tło: noc"]
         if (ahead is not None and not ahead.empty) or (past is not None and not past.empty):
-            st.caption("Prognoza T (Open-Meteo): nad pomiarami — prognoza wydana 24 h wcześniej, "
-                       "dalej — najnowsza do końca jutra i pojutrza · przerywane pionowe linie: północ · czas polski · "
-                       "szare tło: noc")
+            notes.insert(0, "Prognoza T (Open-Meteo): nad pomiarami — prognoza wydana 24 h wcześniej, "
+                            "dalej — najnowsza do końca jutra i pojutrza")
+        st.caption(" · ".join(notes))
         st.altair_chart(charts.hourly_temperature(hourly_local, THEME, ahead, past, sun_local), width="stretch", theme=None)
     if forecast_utc is not None:
         if forecast_utc.empty:
