@@ -60,6 +60,12 @@ def _cfg(chart: alt.Chart, palette: dict, height: int) -> alt.Chart:
     return _style(chart.properties(height=height, width="container"), palette)
 
 
+def _stack(*panels) -> alt.VConcatChart:
+    """Panels one above another, fitted to the container's width. Streamlit leaves a stack of
+    layered panels at autosize "pad", which adds the axes on top of the full width and overflows."""
+    return alt.vconcat(*panels, autosize=alt.AutoSizeParams(type="fit-x", contains="padding"))
+
+
 def daily_temperature(df: pd.DataFrame, normal: pd.DataFrame | None, normal_label: str, theme: str) -> alt.Chart:
     """tn-tx band, tm line, normal tm as a dashed step line."""
     palette = THEMES[theme]
@@ -112,8 +118,8 @@ def daily_precip(df: pd.DataFrame, theme: str) -> alt.Chart:
         tooltip=[alt.Tooltip("date:T", title="data", format="%Y-%m-%d"),
                  alt.Tooltip("cum:Q", title="suma od początku zakresu", format=".1f")])
     # two charts, two axes — never a dual axis
-    return _style(alt.vconcat(bars.properties(height=130, width="container"),
-                        cum.properties(height=100, width="container"))
+    return _style(_stack(bars.properties(height=130, width="container"),
+                         cum.properties(height=100, width="container"))
             .resolve_scale(x="shared"), palette)
 
 
@@ -414,7 +420,7 @@ def forecast_chart(df: pd.DataFrame, theme: str, sun: pd.DataFrame | None = None
     # cloud cover fills the panel behind; precipitation and wind each get their own side's axis
     weather = (alt.layer(*shade, clouds, bars, wind).resolve_scale(y="independent")
                .properties(height=150, width="container"))
-    return _style(alt.vconcat(top, weather).resolve_scale(x="shared"), palette)
+    return _style(_stack(top, weather).resolve_scale(x="shared"), palette)
 
 
 def climograph(year_vals: pd.DataFrame, normals: pd.DataFrame, theme: str, unit: str,
@@ -466,7 +472,7 @@ def stripes(df: pd.DataFrame, theme: str) -> alt.Chart:
     ext = df.loc[[df["anomaly"].idxmax(), df["anomaly"].idxmin()]]
     extreme_labels = alt.Chart(ext).mark_text(dy=-8, color=palette["ink2"], fontSize=11).encode(
         x="year:O", y="anomaly:Q", text=alt.Text("anomaly:Q", format="+.1f"))
-    return _style(alt.vconcat(strip, alt.layer(bars, extreme_labels)), palette)
+    return _style(_stack(strip, alt.layer(bars, extreme_labels)), palette)
 
 
 def cumulative(cum: pd.DataFrame, year: int, normal_period: tuple[int, int], theme: str) -> alt.Chart:

@@ -205,7 +205,7 @@ def column_config(cols, names, width=None):
 
 
 # fixed pixel widths so the month summary lines up with the daily table below it
-DATE_W, PROV_W, VALUE_W = 100, 70, 84
+DATE_W, PROV_W, VALUE_W = 100, 70, 80
 
 
 COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
@@ -296,7 +296,7 @@ with tab_now:
                      column_config={"date": st.column_config.DatetimeColumn(f"czas ({tz_label})", format="DD.MM HH:mm",
                                                                            help="czas polski"),
                                     "◦": st.column_config.Column(" ", width="small"),
-                                    "pogoda": st.column_config.Column("pogoda bieżąca", width="large"),
+                                    "pogoda": st.column_config.Column("pogoda bieżąca", width="medium"),
                                     **column_config(HOURLY_COLS, labels.HOURLY_VARS)})
         # the plots run in Polish local time; the table above stays in UTC like the archive
         hourly_local = charts.to_local(hourly_utc)
