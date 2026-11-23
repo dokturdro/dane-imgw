@@ -308,7 +308,7 @@ with tab_now:
                 ahead = forecast.next_days(forecast_local, pd.Timestamp(obs.max()).to_pydatetime(),
                                            datetime.now(ZoneInfo(charts.LOCAL_TZ)).replace(tzinfo=None))
         notes = ["wiatr (szara linia, oś prawa): ciągła — pomiar, przerywana — prognoza",
-                 "przerywane pionowe linie: północ", "czas polski", "szare tło: noc"]
+                 "szare słupki w tle: zachmurzenie zmierzone (pełna wysokość = 8/8, żółte: niebo niewidoczne — mgła)", "przerywane pionowe linie: północ", "czas polski", "szare tło: noc"]
         if (ahead is not None and not ahead.empty) or (past is not None and not past.empty):
             notes.insert(0, "Prognoza T (Open-Meteo): nad pomiarami — prognoza wydana 24 h wcześniej, "
                             "dalej — najnowsza do końca jutra i pojutrza")

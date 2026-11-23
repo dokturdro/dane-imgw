@@ -36,12 +36,12 @@ THEMES = {
     "light": dict(s1="#2a78d6", s2="#eb6834", s3="#86b6ef", night="rgba(82, 81, 78, 0.13)", fc_label="#b8b7b0", now_rule="#adaca5", ink="#0b0b0b", ink2="#52514e", muted="#898781",
                   grid="#e1e0d9", axis="#c3c2b7", band="#e1e0d9", context="#c3c2b7",
                   div=["#184f95", "#f0efec", "#e34948"],
-                  frost="rgba(158, 197, 244, 0.35)",
+                  frost="rgba(158, 197, 244, 0.35)", fog="#d9b33f",
                   rain=["#9ec5f4", "#5598e7", "#2a78d6", "#1c5cab", "#0d366b"]),
     "dark": dict(s1="#3987e5", s2="#d95926", s3="#9ec5f4", night="rgba(195, 194, 183, 0.10)", fc_label="#62615d", now_rule="#6b6a65", ink="#f0efec", ink2="#c3c2b7", muted="#898781",
                  grid="#2c2c2a", axis="#383835", band="#383835", context="#52514e",
                  div=["#3987e5", "#383835", "#e66767"],
-                 frost="rgba(57, 135, 229, 0.18)",
+                 frost="rgba(57, 135, 229, 0.18)", fog="#d6b04a",
                  rain=["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf"]),
 }
 
@@ -164,7 +164,7 @@ def _ticks(freq: str, *frames: pd.DataFrame) -> list[alt.DateTime]:
 def hourly_temperature(df: pd.DataFrame, theme: str, forecast: pd.DataFrame | None = None,
                        past: pd.DataFrame | None = None, sun: pd.DataFrame | None = None) -> alt.Chart:
     """Observed temperature and dew point, plus the temperature forecast as its own line;
-    wind speed on a right-hand axis.
+    wind speed on a right-hand axis, measured cloud cover as background bars.
 
     ``past``: the forecast issued 24 h earlier for the observed hours (prediction vs result);
     ``forecast``: the latest forecast after the last observation (temperature, dew point, wind);
@@ -198,8 +198,10 @@ def hourly_temperature(df: pd.DataFrame, theme: str, forecast: pd.DataFrame | No
             x=x, y=alt.value(0), text=alt.Text("date:T", format="%d.%m")))
     layers += [line, dots, *text]
     w = _wind(df, forecast)
+    clouds = df[["date", "cloud_cover"]].dropna()
+    cloud_bars = _cloud_layer(palette, axis, clouds, w["date"])
     if d.empty:
-        return _with_wind(palette, layers, _wind_layer(palette, x, w))
+        return _with_wind(palette, cloud_bars, layers, _wind_layer(palette, x, w))
 
     last_obs = d["date"].max()
     fc_parts = []
@@ -232,8 +234,8 @@ def hourly_temperature(df: pd.DataFrame, theme: str, forecast: pd.DataFrame | No
     if have_ahead:   # where the readings end and the latest forecast takes over
         layers.append(alt.Chart(pd.DataFrame({"date": [last_obs]})).mark_rule(
             color=palette["now_rule"], strokeWidth=1.5, strokeDash=[2, 2]).encode(x=x))
-    hover = _hover_columns(palette, axis, d, f if fc_parts else None, w)
-    return _with_wind(palette, layers, _wind_layer(palette, x, w), hover)
+    hover = _hover_columns(palette, axis, d, f if fc_parts else None, w, clouds)
+    return _with_wind(palette, cloud_bars, layers, _wind_layer(palette, x, w), hover)
 
 
 HOURLY_T = "hr_temp"    # the temperature layer, whose y scale the frost shading reads
@@ -260,36 +262,55 @@ def _wind_layer(palette: dict, x: alt.X, w: pd.DataFrame) -> alt.LayerChart:
                      alt.Chart(ahead).mark_line(**line, strokeDash=[5, 3]).encode(x=x, y="wind_speed:Q"))
 
 
-def _with_wind(palette: dict, temperature: list[alt.Chart], wind: alt.LayerChart,
+def _with_wind(palette: dict, clouds: alt.Chart, temperature: list[alt.Chart], wind: alt.LayerChart,
                hover: list[alt.Chart] = ()) -> alt.Chart:
-    """Temperature on the left axis, wind on its own right axis; the hover columns lie over both."""
+    """Cloud cover behind, temperature on the left axis, wind on its own right axis; the hover
+    columns lie over all three."""
     t = alt.layer(*temperature).properties(name=HOURLY_T)
-    return _cfg(alt.layer(t, wind, *hover).resolve_scale(y="independent"), palette, 260)
+    return _cfg(alt.layer(clouds, t, wind, *hover).resolve_scale(y="independent"), palette, 260)
 
 
-HOVER_FIELDS = [("temperatura", "temperatura", "°C"), ("prognoza T", "prognoza", "°C"),
-                ("punkt rosy", "punkt rosy", "°C"), ("wind_speed", "wiatr", "m/s")]
+def _hour_spans(df: pd.DataFrame, span: pd.Series) -> pd.DataFrame:
+    """``df`` with ``start`` / ``end`` half an hour either side of each ``date``, clipped to
+    ``span``'s range so the columns don't widen the x axis."""
+    half = pd.Timedelta(minutes=30)
+    return df.assign(start=(df["date"] - half).clip(lower=span.min()),
+                     end=(df["date"] + half).clip(upper=span.max()))
 
 
-def hover_table(obs: pd.DataFrame, fc_t: pd.DataFrame | None, wind: pd.DataFrame) -> pd.DataFrame:
+def _cloud_layer(palette: dict, axis: alt.Axis, clouds: pd.DataFrame, span: pd.Series) -> alt.Chart:
+    """One bar per observed hour, its height the cloud cover in oktas; no axis, the plot's full
+    height is 8/8. Code 9 (sky obscured, i.e. fog) fills it too, in yellow."""
+    return alt.Chart(_hour_spans(clouds, span)).mark_bar(opacity=0.35, xOffset=0.5, x2Offset=-0.5).encode(
+        x=alt.X("start:T", title=None, axis=axis), x2="end:T",
+        color=alt.condition(alt.datum.cloud_cover == 9, alt.value(palette["fog"]), alt.value(palette["muted"])),
+        y=alt.Y("cloud_cover:Q", axis=None, scale=alt.Scale(domain=[0, 8], clamp=True)), y2=alt.datum(0))
+
+
+HOVER_FIELDS = [("temperatura", "temperatura", "{:.1f} °C"), ("prognoza T", "prognoza", "{:.1f} °C"),
+                ("punkt rosy", "punkt rosy", "{:.1f} °C"), ("wind_speed", "wiatr", "{:.1f} m/s"),
+                ("cloud_cover", "zachmurzenie", "{:.0f}/8")]
+
+
+def hover_table(obs: pd.DataFrame, fc_t: pd.DataFrame | None, wind: pd.DataFrame,
+                clouds: pd.DataFrame) -> pd.DataFrame:
     """One row per hour with every value shown on the plot, pre-formatted ("—" when absent)."""
     wide = obs.pivot_table(index="date", columns="series", values="value")
     if fc_t is not None and not fc_t.empty:
         wide = wide.join(fc_t.set_index("date")["value"].rename("prognoza T"), how="outer")
     wide = wide.join(wind.set_index("date")["wind_speed"], how="outer")
+    wide = wide.join(clouds.set_index("date")["cloud_cover"], how="outer")
     out = pd.DataFrame({"date": wide.index})
-    for col, _, unit in HOVER_FIELDS:
+    for col, _, fmt in HOVER_FIELDS:
         v = wide[col] if col in wide else pd.Series(float("nan"), index=wide.index)
-        out[col] = [("—" if pd.isna(x) else f"{x:.1f} {unit}") for x in v]
+        out[col] = [("—" if pd.isna(x) else fmt.format(x)) for x in v]
     return out
 
 
-def _hover_columns(palette: dict, axis: alt.Axis, obs, fc_t, wind) -> list[alt.Chart]:
+def _hover_columns(palette: dict, axis: alt.Axis, obs, fc_t, wind, clouds) -> list[alt.Chart]:
     """Invisible one-hour columns: hovering anywhere over an hour shows all its values and a guide line."""
-    h = hover_table(obs, fc_t, wind)
-    half = pd.Timedelta(minutes=30)     # clipped to the data, so the columns don't widen the x axis
-    h["start"] = (h["date"] - half).clip(lower=h["date"].min())
-    h["end"] = (h["date"] + half).clip(upper=h["date"].max())
+    h = hover_table(obs, fc_t, wind, clouds)
+    h = _hour_spans(h, h["date"])
     hover = alt.selection_point(fields=["date"], on="pointerover", clear="pointerout", empty=False)
     tip = [alt.Tooltip("date:T", title="czas", format="%d.%m %H:%M"),
            *[alt.Tooltip(f"{col}:N", title=title) for col, title, _ in HOVER_FIELDS]]
