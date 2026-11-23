@@ -33,12 +33,12 @@ def utc_offset_label(dates: pd.Series) -> str:
 RAIN_STOPS_MM = [0, 2.5, 10, 22.5, 40]  # daily totals pinned to each THEMES "rain" colour
 
 THEMES = {
-    "light": dict(s1="#2a78d6", s2="#eb6834", s3="#86b6ef", night="rgba(82, 81, 78, 0.13)", fc_label="#b8b7b0", now_rule="#adaca5", ink="#0b0b0b", ink2="#52514e", muted="#898781",
+    "light": dict(s1="#2a78d6", s2="#eb6834", s3="#86b6ef", night="rgba(82, 81, 78, 0.13)", fc_label="#76756f", now_rule="#adaca5", ink="#0b0b0b", ink2="#52514e", muted="#898781",
                   grid="#e1e0d9", axis="#c3c2b7", band="#e1e0d9", context="#c3c2b7",
                   div=["#184f95", "#f0efec", "#e34948"],
                   frost="rgba(158, 197, 244, 0.35)", fog="#d9b33f",
                   rain=["#9ec5f4", "#5598e7", "#2a78d6", "#1c5cab", "#0d366b"]),
-    "dark": dict(s1="#3987e5", s2="#d95926", s3="#9ec5f4", night="rgba(195, 194, 183, 0.10)", fc_label="#62615d", now_rule="#6b6a65", ink="#f0efec", ink2="#c3c2b7", muted="#898781",
+    "dark": dict(s1="#3987e5", s2="#d95926", s3="#9ec5f4", night="rgba(195, 194, 183, 0.10)", fc_label="#9a9993", now_rule="#6b6a65", ink="#f0efec", ink2="#c3c2b7", muted="#898781",
                  grid="#2c2c2a", axis="#383835", band="#383835", context="#52514e",
                  div=["#3987e5", "#383835", "#e66767"],
                  frost="rgba(57, 135, 229, 0.18)", fog="#d6b04a",
