@@ -43,6 +43,7 @@ def day_ahead(client: httpx.Client, lat: float, lon: float, elevation: float | N
 
 
 def next_days(df: pd.DataFrame, after: datetime, now: datetime, days: int = 2) -> pd.DataFrame:
-    """Forecast rows later than the last observation ``after``: the rest of today plus ``days`` full days."""
+    """Forecast rows later than the last observation ``after``: the rest of today plus ``days`` full days,
+    up to and including the midnight that closes the last one."""
     end = datetime.combine(now.date() + timedelta(days=days + 1), datetime.min.time())
-    return df[(df["date"] > after) & (df["date"] < end)].reset_index(drop=True)
+    return df[(df["date"] > after) & (df["date"] <= end)].reset_index(drop=True)

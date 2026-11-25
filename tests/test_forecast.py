@@ -46,7 +46,7 @@ def test_next_days_window():
     df = pd.DataFrame({"date": pd.date_range("2026-11-07", periods=120, freq="h"), "tm": 1.0})
     out = forecast.next_days(df, after=datetime(2026, 11, 7, 5), now=datetime(2026, 11, 7, 6, 30))
     assert out["date"].min() == pd.Timestamp("2026-11-07 06:00")
-    assert out["date"].max() == pd.Timestamp("2026-11-09 23:00")       # today + two full days
+    assert out["date"].max() == pd.Timestamp("2026-11-10 00:00")       # today + two full days, to their closing midnight
 
 
 def test_charts_build():
