@@ -84,6 +84,14 @@ def test_midnight_rules_inside_span():
     assert charts._midnights(obs, fc)["date"].dt.day.tolist() == [7, 8, 9]
 
 
+def test_hourly_span_closes_a_day_ending_at_23():
+    whole = pd.DataFrame({"date": pd.date_range("2026-11-07 00:00", "2026-11-07 23:00", freq="h")})
+    assert charts._hourly_span(whole)["date"].max() == pd.Timestamp("2026-11-08 00:00")
+    assert charts._midnights(charts._hourly_span(whole))["date"].tolist() == [pd.Timestamp("2026-11-08 00:00")]
+    partial = whole.iloc[:15]
+    assert charts._hourly_span(partial)["date"].max() == pd.Timestamp("2026-11-07 14:00")
+
+
 def test_daily_extremes_use_day_and_night_windows():
     idx = pd.date_range("2026-11-07 00:00", "2026-11-08 23:00", freq="h")
     tm = pd.DataFrame({"date": idx, "value": [float(-abs(12 - h.hour)) if h.day == 7 else 5.0 for h in idx]})

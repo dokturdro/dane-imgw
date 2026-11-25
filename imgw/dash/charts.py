@@ -154,6 +154,16 @@ def _midnights(*frames: pd.DataFrame, include_start: bool = False) -> pd.DataFra
     return pd.DataFrame({"date": days if dates.min() in days else days.insert(0, dates.min())})
 
 
+def _hourly_span(*frames: pd.DataFrame) -> pd.DataFrame:
+    """The frames' dates, plus the following midnight when the last one is 23:00, so a whole last
+    day gets its closing tick and separator and the next day its date."""
+    dates = pd.concat([pd.to_datetime(f["date"]) for f in frames if f is not None and not f.empty])
+    end = dates.max() + pd.Timedelta(hours=1)
+    if end == end.normalize():
+        dates = pd.concat([dates, pd.Series([end])], ignore_index=True)
+    return dates.to_frame("date")
+
+
 def _ticks(freq: str, *frames: pd.DataFrame) -> list[alt.DateTime]:
     """Tick values every ``freq`` ("3h", "D") across the frames' span; DateTime keeps them in the
     data's (naive) time."""
@@ -180,8 +190,9 @@ def hourly_temperature(df: pd.DataFrame, theme: str, forecast: pd.DataFrame | No
     d = _melt(df)
     series = alt.Scale(domain=[*SERIES.values(), FC_T], range=[palette["s1"], palette["s2"], palette["s3"]])
     color = alt.Color("series:N", title=None, scale=series)
+    span = _hourly_span(d, forecast)
     # hours below (every 3 h); the date sits on top, once per day, over its midnight separator
-    axis = alt.Axis(format="%H", labelAngle=0, labelOverlap=False, values=_ticks("3h", d, forecast))
+    axis = alt.Axis(format="%H", labelAngle=0, labelOverlap=False, values=_ticks("3h", span))
     x = alt.X("date:T", title=None, axis=axis)
     base = alt.Chart(d).encode(x=x, y=alt.Y("value:Q", title="°C", scale=alt.Scale(zero=False)))
     line = base.mark_line(strokeWidth=2).encode(color=color)
@@ -195,11 +206,11 @@ def hourly_temperature(df: pd.DataFrame, theme: str, forecast: pd.DataFrame | No
     # temperature labels above its dots, dew point below, so the two series don't collide
     text = [base.mark_text(dy=dy, fontSize=9, color=palette["ink2"]).encode(text=alt.Text("value:Q", format=".1f"))
             .transform_filter(alt.datum.series == s) for s, dy in (("temperatura", -10), ("punkt rosy", 11))]
-    layers = [*_night_layer(palette, sun, axis, d, forecast), _frost(palette, f"{HOURLY_T}_y")]
+    layers = [*_night_layer(palette, sun, axis, span), _frost(palette, f"{HOURLY_T}_y")]
     if not d.empty:
-        layers.append(alt.Chart(_midnights(d, forecast)).mark_rule(color=palette["muted"], strokeWidth=1.5, strokeDash=[6, 4])
+        layers.append(alt.Chart(_midnights(span)).mark_rule(color=palette["muted"], strokeWidth=1.5, strokeDash=[6, 4])
                       .encode(x=x))
-        layers.append(alt.Chart(_midnights(d, forecast, include_start=True)).mark_text(
+        layers.append(alt.Chart(_midnights(span, include_start=True)).mark_text(
             baseline="bottom", dy=-4, fontSize=11, fontWeight="bold", color=palette["ink2"]).encode(
             x=x, y=alt.value(0), text=alt.Text("date:T", format="%d.%m")))
     layers += [line, dots, *text]
